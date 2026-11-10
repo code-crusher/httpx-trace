@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gc
 import typing
+import weakref
 from datetime import timedelta
 
 import pytest
@@ -373,3 +375,28 @@ async def test_server_extensions(server):
         response = await client.get(url)
     assert response.status_code == 200
     assert response.extensions["http_version"] == b"HTTP/1.1"
+
+
+@pytest.mark.anyio
+async def test_response_stream_does_not_keep_response_alive():
+    """
+    The bound async response stream should not create a reference cycle back to
+    the response, which would otherwise delay reclaiming the response (and the
+    underlying connection and its SSL context) until the cyclic GC runs.
+    """
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"Hi"))
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        gc.disable()
+        try:
+            response = await client.get("http://www.example.com")
+            stream = response.stream
+            response_ref = weakref.ref(response)
+            del response
+
+            # With refcounting alone the response should already be reclaimed.
+            assert response_ref() is None
+            # Closing the stream must still work without the response.
+            await stream.aclose()
+        finally:
+            gc.enable()

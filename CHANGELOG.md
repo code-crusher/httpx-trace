@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [UNRELEASED]
 
+### Fixed
+
+* Avoid reference cycles from `BoundSyncStream` and `BoundAsyncStream` back to the response object. Responses (and the connections and SSL contexts they hold) are now freed by reference counting rather than waiting for the cyclic garbage collector, which could cause significant memory growth. (#3734)
+
 ### Removed
 
 * Drop support for Python 3.8

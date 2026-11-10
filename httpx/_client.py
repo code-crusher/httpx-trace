@@ -6,6 +6,7 @@ import logging
 import time
 import typing
 import warnings
+import weakref
 from contextlib import asynccontextmanager, contextmanager
 from types import TracebackType
 
@@ -146,7 +147,11 @@ class BoundSyncStream(SyncByteStream):
         self, stream: SyncByteStream, response: Response, start: float
     ) -> None:
         self._stream = stream
-        self._response = response
+        # Use a weak reference so that the response is not kept alive by a
+        # reference cycle. Otherwise the response, stream, and the underlying
+        # connection (including its SSL context) are only reclaimed once the
+        # cyclic garbage collector runs.
+        self._response = weakref.ref(response)
         self._start = start
 
     def __iter__(self) -> typing.Iterator[bytes]:
@@ -155,7 +160,9 @@ class BoundSyncStream(SyncByteStream):
 
     def close(self) -> None:
         elapsed = time.perf_counter() - self._start
-        self._response.elapsed = datetime.timedelta(seconds=elapsed)
+        response = self._response()
+        if response is not None:
+            response.elapsed = datetime.timedelta(seconds=elapsed)
         self._stream.close()
 
 
@@ -169,7 +176,8 @@ class BoundAsyncStream(AsyncByteStream):
         self, stream: AsyncByteStream, response: Response, start: float
     ) -> None:
         self._stream = stream
-        self._response = response
+        # See BoundSyncStream for why a weak reference is used here.
+        self._response = weakref.ref(response)
         self._start = start
 
     async def __aiter__(self) -> typing.AsyncIterator[bytes]:
@@ -178,7 +186,9 @@ class BoundAsyncStream(AsyncByteStream):
 
     async def aclose(self) -> None:
         elapsed = time.perf_counter() - self._start
-        self._response.elapsed = datetime.timedelta(seconds=elapsed)
+        response = self._response()
+        if response is not None:
+            response.elapsed = datetime.timedelta(seconds=elapsed)
         await self._stream.aclose()
 
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gc
 import typing
+import weakref
 from datetime import timedelta
 
 import chardet
@@ -460,3 +462,28 @@ def test_client_decode_text_using_explicit_encoding():
         assert response.reason_phrase == "OK"
         assert response.encoding == "ISO-8859-1"
         assert response.text == text
+
+
+def test_response_stream_does_not_keep_response_alive():
+    """
+    The bound response stream should not create a reference cycle back to the
+    response, which would otherwise delay reclaiming the response (and the
+    underlying connection and its SSL context) until the cyclic GC runs.
+    """
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"Hi"))
+    client = httpx.Client(transport=transport)
+
+    gc.disable()
+    try:
+        response = client.get("http://www.example.com")
+        stream = response.stream
+        response_ref = weakref.ref(response)
+        del response
+
+        # With refcounting alone the response should already be reclaimed.
+        assert response_ref() is None
+        # Closing the stream must still work without the response.
+        stream.close()
+    finally:
+        gc.enable()
+        client.close()
