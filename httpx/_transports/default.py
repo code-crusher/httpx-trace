@@ -53,7 +53,7 @@ from .._exceptions import (
     WriteTimeout,
 )
 from .._models import Request, Response
-from .._types import AsyncByteStream, CertTypes, ProxyTypes, SyncByteStream
+from .._types import AsyncByteStream, CertTypes, SyncByteStream
 from .._urls import URL
 from .base import AsyncBaseTransport, BaseTransport
 
@@ -141,7 +141,7 @@ class HTTPTransport(BaseTransport):
         http1: bool = True,
         http2: bool = False,
         limits: Limits = DEFAULT_LIMITS,
-        proxy: ProxyTypes | None = None,
+        proxy: Proxy | None = None,
         uds: str | None = None,
         local_address: str | None = None,
         retries: int = 0,
@@ -285,7 +285,7 @@ class AsyncHTTPTransport(AsyncBaseTransport):
         http1: bool = True,
         http2: bool = False,
         limits: Limits = DEFAULT_LIMITS,
-        proxy: ProxyTypes | None = None,
+        proxy: Proxy | None = None,
         uds: str | None = None,
         local_address: str | None = None,
         retries: int = 0,

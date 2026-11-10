@@ -6,6 +6,7 @@ import logging
 import time
 import typing
 import warnings
+from collections.abc import Mapping
 from contextlib import asynccontextmanager, contextmanager
 from types import TracebackType
 
@@ -246,6 +247,11 @@ class BaseClient:
                     for key, url in get_environment_proxies().items()
                 }
             return {}
+        elif isinstance(proxy, Mapping):
+            return {
+                key: Proxy(url=value) if isinstance(value, (str, URL)) else value
+                for key, value in proxy.items()
+            }
         else:
             proxy = Proxy(url=proxy) if isinstance(proxy, (str, URL)) else proxy
             return {"all://": proxy}
@@ -619,7 +625,9 @@ class Client(BaseClient):
     `ssl.SSLContext` to use a custom context.
     * **http2** - *(optional)* A boolean indicating if HTTP/2 support should be
     enabled. Defaults to `False`.
-    * **proxy** - *(optional)* A proxy URL where all the traffic should be routed.
+    * **proxy** - *(optional)* A proxy URL where all the traffic should be routed,
+    or a dictionary mapping URL patterns to proxy URLs, such as
+    `{'http://': 'http://proxy:8080', 'https://': 'http://proxy:8080'}`.
     * **timeout** - *(optional)* The timeout configuration to use when sending
     requests.
     * **limits** - *(optional)* The limits configuration to use.
@@ -1333,7 +1341,9 @@ class AsyncClient(BaseClient):
     `ssl.SSLContext` to use a custom context.
     * **http2** - *(optional)* A boolean indicating if HTTP/2 support should be
     enabled. Defaults to `False`.
-    * **proxy** - *(optional)* A proxy URL where all the traffic should be routed.
+    * **proxy** - *(optional)* A proxy URL where all the traffic should be routed,
+    or a dictionary mapping URL patterns to proxy URLs, such as
+    `{'http://': 'http://proxy:8080', 'https://': 'http://proxy:8080'}`.
     * **timeout** - *(optional)* The timeout configuration to use when sending
     requests.
     * **limits** - *(optional)* The limits configuration to use.

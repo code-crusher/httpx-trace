@@ -99,6 +99,45 @@ def test_transport_for_request(url, proxies, expected):
         assert transport._pool._proxy_url == url_to_origin(expected)
 
 
+@pytest.mark.parametrize(
+    "client_class, transport_class",
+    [
+        (httpx.Client, httpx.HTTPTransport),
+        (httpx.AsyncClient, httpx.AsyncHTTPTransport),
+    ],
+)
+def test_proxy_dict(client_class, transport_class):
+    proxy_url = "http://[::1]:8080"
+    client = client_class(
+        proxy={
+            "http://": proxy_url,
+            "https://": "http://[::1]:8081",
+        }
+    )
+
+    http_transport = client._transport_for_url(httpx.URL("http://example.com"))
+    assert isinstance(http_transport, transport_class)
+    assert http_transport._pool._proxy_url == url_to_origin(proxy_url)
+
+    https_transport = client._transport_for_url(httpx.URL("https://example.com"))
+    assert isinstance(https_transport, transport_class)
+    assert https_transport._pool._proxy_url == url_to_origin("http://[::1]:8081")
+
+
+def test_proxy_dict_with_proxy_instance():
+    proxy = httpx.Proxy("http://[::1]:8080")
+    client = httpx.Client(proxy={"all://": proxy})
+
+    transport = client._transport_for_url(httpx.URL("http://example.com"))
+    assert isinstance(transport, httpx.HTTPTransport)
+    assert transport._pool._proxy_url == url_to_origin("http://[::1]:8080")
+
+
+def test_proxy_dict_with_invalid_scheme():
+    with pytest.raises(ValueError):
+        httpx.Client(proxy={"all://": "ftp://127.0.0.1"})
+
+
 @pytest.mark.anyio
 @pytest.mark.network
 async def test_async_proxy_close():
