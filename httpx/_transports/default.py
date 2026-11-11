@@ -27,7 +27,9 @@ client = httpx.Client(transport=transport)
 from __future__ import annotations
 
 import contextlib
+import os
 import typing
+from functools import lru_cache
 from types import TracebackType
 
 if typing.TYPE_CHECKING:
@@ -69,6 +71,45 @@ SOCKET_OPTION = typing.Union[
 __all__ = ["AsyncHTTPTransport", "HTTPTransport"]
 
 HTTPCORE_EXC_MAP: dict[type[Exception], type[httpx.HTTPError]] = {}
+
+
+@lru_cache(maxsize=8)
+def _create_default_ssl_context(
+    ssl_cert_file: str | None,
+    ssl_cert_dir: str | None,
+    sslkeylogfile: str | None,
+    http2: bool,
+) -> ssl.SSLContext:
+    """
+    Create the default SSL context, reusing a cached instance where possible.
+
+    Building an SSL context loads the certificate authority bundle, which is
+    relatively expensive. Since the default configuration is identical for
+    every client, we only need to build it once.
+
+    The environment variables that `create_ssl_context()` consults are passed
+    in as cache keys, so that changing them at runtime still results in an
+    appropriately configured context. The `http2` flag is included because
+    `httpcore` configures the ALPN protocols on the context when connecting,
+    and we don't want connections with differing protocols to share a context.
+    """
+    return create_ssl_context()
+
+
+def _create_or_reuse_ssl_context(
+    verify: ssl.SSLContext | str | bool = True,
+    cert: CertTypes | None = None,
+    trust_env: bool = True,
+    http2: bool = False,
+) -> ssl.SSLContext:
+    if verify is True and cert is None and trust_env is True:
+        return _create_default_ssl_context(
+            os.environ.get("SSL_CERT_FILE"),
+            os.environ.get("SSL_CERT_DIR"),
+            os.environ.get("SSLKEYLOGFILE"),
+            http2,
+        )
+    return create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
 
 
 def _load_httpcore_exceptions() -> dict[type[Exception], type[httpx.HTTPError]]:
@@ -150,7 +191,9 @@ class HTTPTransport(BaseTransport):
         import httpcore
 
         proxy = Proxy(url=proxy) if isinstance(proxy, (str, URL)) else proxy
-        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
+        ssl_context = _create_or_reuse_ssl_context(
+            verify=verify, cert=cert, trust_env=trust_env, http2=http2
+        )
 
         if proxy is None:
             self._pool = httpcore.ConnectionPool(
@@ -294,7 +337,9 @@ class AsyncHTTPTransport(AsyncBaseTransport):
         import httpcore
 
         proxy = Proxy(url=proxy) if isinstance(proxy, (str, URL)) else proxy
-        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
+        ssl_context = _create_or_reuse_ssl_context(
+            verify=verify, cert=cert, trust_env=trust_env, http2=http2
+        )
 
         if proxy is None:
             self._pool = httpcore.AsyncConnectionPool(

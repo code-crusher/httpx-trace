@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 * Expose `FunctionAuth` from the public API. (#3699)
 
+### Fixed
+
+* Reuse the default SSL context between clients, rather than recreating it each
+  time. Creating an `AsyncClient` synchronously loaded the CA bundle, blocking
+  the event loop and serializing concurrently created tasks. (#3704)
+
 ## 0.28.1 (6th December, 2024)
 
 * Fix SSL case where `verify=False` together with client side certificates.
