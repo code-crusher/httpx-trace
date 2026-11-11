@@ -968,8 +968,16 @@ class Response:
 
         if not self.is_closed:
             self.is_closed = True
-            with request_context(request=self._request):
-                self.stream.close()
+            try:
+                with request_context(request=self._request):
+                    self.stream.close()
+            except BaseException:
+                # If the close was interrupted (eg. by a cancellation) then
+                # reset the flag, so that any subsequent call is able to
+                # retry closing the stream, rather than silently skipping it.
+                # See https://github.com/encode/httpx/issues/3782
+                self.is_closed = False
+                raise
 
     async def aread(self) -> bytes:
         """
@@ -1072,8 +1080,16 @@ class Response:
 
         if not self.is_closed:
             self.is_closed = True
-            with request_context(request=self._request):
-                await self.stream.aclose()
+            try:
+                with request_context(request=self._request):
+                    await self.stream.aclose()
+            except BaseException:
+                # If the close was interrupted (eg. by a cancellation) then
+                # reset the flag, so that any subsequent call is able to
+                # retry closing the stream, rather than silently skipping it.
+                # See https://github.com/encode/httpx/issues/3782
+                self.is_closed = False
+                raise
 
 
 class Cookies(typing.MutableMapping[str, str]):

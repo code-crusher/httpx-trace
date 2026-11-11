@@ -517,6 +517,88 @@ async def test_aclose_on_sync():
         await response.aclose()
 
 
+def test_close_can_be_retried_after_interrupted_close():
+    """
+    If an exception occurs part-way through closing the response, then
+    `response.is_closed` should not be left set, so that a subsequent
+    `response.close()` is able to retry closing the underlying stream.
+
+    See https://github.com/encode/httpx/issues/3782
+    """
+
+    class InterruptedStream(httpx.SyncByteStream):
+        def __init__(self) -> None:
+            self.close_count = 0
+
+        def __iter__(self) -> typing.Iterator[bytes]:
+            yield b"Hello, world!"
+
+        def close(self) -> None:
+            self.close_count += 1
+            if self.close_count == 1:
+                raise RuntimeError("Interrupted close")
+
+    stream = InterruptedStream()
+    response = httpx.Response(200, stream=stream)
+
+    with pytest.raises(RuntimeError, match="Interrupted close"):
+        response.close()
+
+    assert not response.is_closed
+
+    response.close()
+    assert response.is_closed
+    assert stream.close_count == 2
+
+
+@pytest.mark.anyio
+async def test_aclose_can_be_retried_after_interrupted_close():
+    """
+    If a cancellation occurs part-way through closing the response, then
+    `response.is_closed` should not be left set, so that a subsequent
+    `response.aclose()` is able to retry closing the underlying stream.
+
+    This ensures that a retried close is not silently skipped after an
+    interrupted one, which would otherwise leak the connection from the
+    connection pool.
+
+    See https://github.com/encode/httpx/issues/3782
+    """
+    import anyio
+
+    class InterruptedAsyncStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.close_count = 0
+            self.close_entered = anyio.Event()
+
+        async def __aiter__(self) -> typing.AsyncIterator[bytes]:
+            yield b"Hello, world!"
+
+        async def aclose(self) -> None:
+            self.close_count += 1
+            if self.close_count == 1:
+                self.close_entered.set()
+                # Block inside the close, giving the cancellation time to
+                # land part-way through the response close.
+                await anyio.sleep_forever()
+
+    stream = InterruptedAsyncStream()
+    response = httpx.Response(200, stream=stream)
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(response.aclose)
+        await stream.close_entered.wait()
+        task_group.cancel_scope.cancel()
+
+    assert not response.is_closed
+
+    # The retry is now able to actually close the stream.
+    await response.aclose()
+
+    assert response.is_closed
+    assert stream.close_count == 2
+
+
 @pytest.mark.anyio
 async def test_aiter_raw_increments_updates_counter():
     response = httpx.Response(200, content=async_streaming_body())

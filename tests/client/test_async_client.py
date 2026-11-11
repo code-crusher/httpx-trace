@@ -3,6 +3,7 @@ from __future__ import annotations
 import typing
 from datetime import timedelta
 
+import anyio
 import pytest
 
 import httpx
@@ -364,6 +365,61 @@ async def test_cancellation_during_stream():
         with pytest.raises(KeyboardInterrupt):
             await client.get("https://www.example.com")
         assert stream_was_closed
+
+
+@pytest.mark.anyio
+async def test_cancellation_during_response_close():
+    """
+    If a task is cancelled while the response stream is being closed, then
+    a subsequent `response.aclose()` should still close the stream, rather
+    than being silently skipped, which would otherwise leave the underlying
+    connection leaked from the connection pool.
+
+    See https://github.com/encode/httpx/issues/3782
+    """
+
+    class InterruptedCloseStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.close_count = 0
+            self.close_entered = anyio.Event()
+
+        async def __aiter__(self) -> typing.AsyncIterator[bytes]:
+            yield b"Hello, world!"  # pragma: no cover
+
+        async def aclose(self) -> None:
+            self.close_count += 1
+            if self.close_count == 1:
+                self.close_entered.set()
+                # Block inside the close, so that a cancellation delivered
+                # here lands part-way through the response close.
+                await anyio.sleep_forever()  # pragma: no cover
+
+    stream = InterruptedCloseStream()
+
+    def response_with_interrupted_close(request):
+        return httpx.Response(200, headers={"Content-Length": "12"}, stream=stream)
+
+    transport = httpx.MockTransport(response_with_interrupted_close)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        response = await client.send(
+            client.build_request("GET", "https://www.example.com"), stream=True
+        )
+
+        # Run the response close as a task, and cancel it while the
+        # close is in progress.
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(response.aclose)
+            await stream.close_entered.wait()
+            task_group.cancel_scope.cancel()
+
+        assert not response.is_closed
+
+        # Retrying the close must not be skipped.
+        await response.aclose()
+
+        assert response.is_closed
+        assert stream.close_count == 2
 
 
 @pytest.mark.anyio
