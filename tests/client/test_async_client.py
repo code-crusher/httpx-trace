@@ -373,3 +373,58 @@ async def test_server_extensions(server):
         response = await client.get(url)
     assert response.status_code == 200
     assert response.extensions["http_version"] == b"HTTP/1.1"
+
+
+@pytest.mark.anyio
+async def test_connection_extension(server):
+    url = server.url
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=1)) as client:
+        first = await client.get(url)
+        second = await client.get(url)
+
+        # Requests sent over the same connection expose the same connection.
+        assert first.extensions["connection"] is second.extensions["connection"]
+
+        # Closing a single connection removes it from the pool, without
+        # requiring the entire client to be discarded.
+        await first.extensions["connection"].aclose()
+
+        third = await client.get(url)
+        assert third.extensions["connection"] is not first.extensions["connection"]
+
+
+@pytest.mark.anyio
+async def test_close_connection_after_n_requests(server):
+    # Connections can be tracked across requests, and retired once they've
+    # been used a given number of times.
+    # See https://github.com/encode/httpx/issues/3638
+    url = server.url
+    max_requests = 2
+    request_counts: typing.Dict[typing.Any, int] = {}
+
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=1)) as client:
+        for _ in range(6):
+            response = await client.get(url)
+            connection = response.extensions["connection"]
+            request_counts[connection] = request_counts.get(connection, 0) + 1
+
+            if request_counts[connection] >= max_requests:
+                await connection.aclose()
+
+    assert sorted(request_counts.values()) == [max_requests] * 3
+
+
+@pytest.mark.anyio
+async def test_close_connection_on_error_response(server):
+    # A connection that receives an unwanted response, such as a 429, can be
+    # closed without closing the entire client.
+    # See https://github.com/encode/httpx/issues/3638
+    url = server.url.copy_with(path="/status/429")
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=1)) as client:
+        first = await client.get(url)
+        assert first.status_code == 429
+        await first.extensions["connection"].aclose()
+
+        second = await client.get(url)
+        assert second.status_code == 429
+        assert second.extensions["connection"] is not first.extensions["connection"]

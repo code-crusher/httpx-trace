@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 * Expose `FunctionAuth` from the public API. (#3699)
+* Add a `"connection"` response extension, allowing individual pooled connections to be identified and closed. (#3638)
 
 ## 0.28.1 (6th December, 2024)
 

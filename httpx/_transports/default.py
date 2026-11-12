@@ -92,6 +92,26 @@ def _load_httpcore_exceptions() -> dict[type[Exception], type[httpx.HTTPError]]:
     }
 
 
+def _add_connection_extension(
+    extensions: typing.Mapping[str, typing.Any], response: typing.Any
+) -> dict[str, typing.Any]:
+    """
+    Return a copy of the response extensions, with an additional `"connection"`
+    entry identifying the underlying `httpcore` connection.
+
+    This allows individual connections to be identified and closed by the
+    application, without having to close the entire connection pool.
+
+    See https://github.com/encode/httpx/issues/3638
+    """
+    connection = getattr(
+        getattr(response.stream, "_pool_request", None), "connection", None
+    )
+    if connection is None:
+        return dict(extensions)
+    return {**extensions, "connection": connection}
+
+
 @contextlib.contextmanager
 def map_httpcore_exceptions() -> typing.Iterator[None]:
     global HTTPCORE_EXC_MAP
@@ -255,7 +275,7 @@ class HTTPTransport(BaseTransport):
             status_code=resp.status,
             headers=resp.headers,
             stream=ResponseStream(resp.stream),
-            extensions=resp.extensions,
+            extensions=_add_connection_extension(resp.extensions, resp),
         )
 
     def close(self) -> None:
@@ -399,7 +419,7 @@ class AsyncHTTPTransport(AsyncBaseTransport):
             status_code=resp.status,
             headers=resp.headers,
             stream=AsyncResponseStream(resp.stream),
-            extensions=resp.extensions,
+            extensions=_add_connection_extension(resp.extensions, resp),
         )
 
     async def aclose(self) -> None:

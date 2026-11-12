@@ -407,6 +407,58 @@ def test_server_extensions(server):
     assert response.extensions["http_version"] == b"HTTP/1.1"
 
 
+def test_connection_extension(server):
+    url = server.url
+    with httpx.Client(limits=httpx.Limits(max_connections=1)) as client:
+        first = client.get(url)
+        second = client.get(url)
+
+        # Requests sent over the same connection expose the same connection.
+        assert first.extensions["connection"] is second.extensions["connection"]
+
+        # Closing a single connection removes it from the pool, without
+        # requiring the entire client to be discarded.
+        first.extensions["connection"].close()
+
+        third = client.get(url)
+        assert third.extensions["connection"] is not first.extensions["connection"]
+
+
+def test_close_connection_after_n_requests(server):
+    # Connections can be tracked across requests, and retired once they've
+    # been used a given number of times.
+    # See https://github.com/encode/httpx/issues/3638
+    url = server.url
+    max_requests = 2
+    request_counts: typing.Dict[typing.Any, int] = {}
+
+    with httpx.Client(limits=httpx.Limits(max_connections=1)) as client:
+        for _ in range(6):
+            response = client.get(url)
+            connection = response.extensions["connection"]
+            request_counts[connection] = request_counts.get(connection, 0) + 1
+
+            if request_counts[connection] >= max_requests:
+                connection.close()
+
+    assert sorted(request_counts.values()) == [max_requests] * 3
+
+
+def test_close_connection_on_error_response(server):
+    # A connection that receives an unwanted response, such as a 429, can be
+    # closed without closing the entire client.
+    # See https://github.com/encode/httpx/issues/3638
+    url = server.url.copy_with(path="/status/429")
+    with httpx.Client(limits=httpx.Limits(max_connections=1)) as client:
+        first = client.get(url)
+        assert first.status_code == 429
+        first.extensions["connection"].close()
+
+        second = client.get(url)
+        assert second.status_code == 429
+        assert second.extensions["connection"] is not first.extensions["connection"]
+
+
 def test_client_decode_text_using_autodetect():
     # Ensure that a 'default_encoding=autodetect' on the response allows for
     # encoding autodetection to be used when no "Content-Type: text/plain; charset=..."

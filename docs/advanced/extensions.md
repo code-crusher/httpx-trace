@@ -201,6 +201,43 @@ When no key is included, a default based on the status code may be used.
 
 When HTTP/2 is being used the `"stream_id"` response extension can be accessed to determine the ID of the data stream that the response was sent on.
 
+### `"connection"`
+
+The `"connection"` extension is the connection that was used to send the request. Connections are pooled and reused, so the same connection object may be returned for multiple responses.
+
+This allows individual connections to be identified, tracked, and closed, without having to close the entire client. For example, to retire each connection after a number of requests...
+
+```python
+import httpx
+
+requests_per_connection = 100
+request_counts = {}
+
+with httpx.Client() as client:
+    for url in urls:
+        response = client.get(url)
+        connection = response.extensions["connection"]
+
+        request_counts[connection] = request_counts.get(connection, 0) + 1
+        if request_counts[connection] >= requests_per_connection:
+            connection.close()
+```
+
+Or to discard a connection that has received an unwanted response...
+
+```python
+with httpx.Client() as client:
+    response = client.get(url)
+    if response.status_code == 429:
+        response.extensions["connection"].close()
+```
+
+Note that the connection is an `httpcore` connection object, and its interface is not part of the stable `httpx` API. When using an `AsyncClient` the connection is closed with `await connection.aclose()`.
+
+Closing a connection is safe while a response is being streamed. The response should still be closed as normal.
+
+The extension is only present when using the default HTTP transports. It is not included for other transports, such as `httpx.MockTransport`.
+
 ### `"network_stream"`
 
 The `"network_stream"` extension allows developers to handle HTTP `CONNECT` and `Upgrade` requests, by providing an API that steps outside the standard request/response model, and can directly read or write to the network.
