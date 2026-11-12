@@ -8,11 +8,20 @@ else
     PREFIX=""
 fi
 
+VERSION=`grep __version__ ${VERSION_FILE} | grep -o '[0-9][^"]*'`
+
+# Pre-release versions must not be published to the "httpx" package name,
+# since `pip install httpx --pre` and `uv` with prereleases enabled will
+# select them in place of the latest stable release.
+# See https://github.com/encode/httpx/issues/3635
+if ! echo "${VERSION}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(\.post[0-9]+)?$' ; then
+    echo "Refusing to publish pre-release version '${VERSION}' to PyPI."
+    exit 1
+fi
+
 if [ ! -z "$GITHUB_ACTIONS" ]; then
   git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
   git config --local user.name "GitHub Action"
-
-  VERSION=`grep __version__ ${VERSION_FILE} | grep -o '[0-9][^"]*'`
 
   if [ "refs/tags/${VERSION}" != "${GITHUB_REF}" ] ; then
     echo "GitHub Ref '${GITHUB_REF}' did not match package version '${VERSION}'"

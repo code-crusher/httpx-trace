@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 * Expose `FunctionAuth` from the public API. (#3699)
+* Guard `scripts/publish` against publishing pre-release versions to the
+  `httpx` package name on PyPI, and document the pre-release design previews
+  for anyone affected. (#3635)
 
 ## 0.28.1 (6th December, 2024)
 

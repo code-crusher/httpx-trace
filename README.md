@@ -103,6 +103,14 @@ $ pip install httpx[http2]
 
 HTTPX requires Python 3.9+.
 
+### A note on pre-releases
+
+Beware of installing pre-release versions, such as `1.0.devN`, which are
+incomplete design previews with a different API to the current `0.x` releases.
+Use `pip install httpx` without the `--pre` flag (or `uv` with
+`--no-prereleases`) to make sure you get the stable release. See
+[#3635](https://github.com/encode/httpx/issues/3635) for background.
+
 ## Documentation
 
 Project documentation is available at [https://www.python-httpx.org/](https://www.python-httpx.org/).
