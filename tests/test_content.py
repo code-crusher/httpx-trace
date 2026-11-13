@@ -1,3 +1,4 @@
+import inspect
 import io
 import typing
 
@@ -21,6 +22,24 @@ async def test_empty_content():
     assert request.headers == {"Host": "www.example.com", "Content-Length": "0"}
     assert sync_content == b""
     assert async_content == b""
+
+
+@pytest.mark.anyio
+async def test_bytes_content_async_iterator_is_not_async_generator():
+    # Abandoning an async generator part-way through means it gets garbage
+    # collected without being exhausted, which the event loop reports as a
+    # `ResourceWarning`. `ByteStream.__aiter__` therefore returns a concrete
+    # async iterator instead.
+    # See: https://github.com/encode/httpx/issues/3597
+    request = httpx.Request(method, url, content=b"Hello, world!")
+    assert isinstance(request.stream, httpx.AsyncByteStream)
+    iterator = request.stream.__aiter__()
+
+    assert not inspect.isasyncgen(iterator)
+    assert iterator.__aiter__() is iterator
+    assert await iterator.__anext__() == b"Hello, world!"
+    with pytest.raises(StopAsyncIteration):
+        await iterator.__anext__()
 
 
 @pytest.mark.anyio

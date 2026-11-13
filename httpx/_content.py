@@ -35,8 +35,28 @@ class ByteStream(AsyncByteStream, SyncByteStream):
     def __iter__(self) -> Iterator[bytes]:
         yield self._stream
 
-    async def __aiter__(self) -> AsyncIterator[bytes]:
-        yield self._stream
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        # Return a concrete iterator rather than an async generator, so that
+        # abandoning the stream part-way through doesn't leave an unexhausted
+        # async generator for the event loop to garbage collect.
+        return _ByteStreamAsyncIterator(self._stream)
+
+
+class _ByteStreamAsyncIterator:
+    __slots__ = ("_stream",)
+
+    def __init__(self, stream: bytes) -> None:
+        self._stream: bytes | None = stream
+
+    def __aiter__(self) -> _ByteStreamAsyncIterator:
+        return self
+
+    async def __anext__(self) -> bytes:
+        stream = self._stream
+        if stream is None:
+            raise StopAsyncIteration
+        self._stream = None
+        return stream
 
 
 class IteratorByteStream(SyncByteStream):
