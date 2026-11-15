@@ -11,19 +11,37 @@ import pytest
 import httpx
 
 
+def test_base_auth_is_a_no_op():
+    auth = httpx.Auth()
+    request = httpx.Request("GET", "https://www.example.com")
+
+    # The default implementations leave the request and response untouched.
+    assert auth.authenticate_request(request) is request
+    response = httpx.Response(content=b"Hello, world!", status_code=200)
+    assert auth.authenticate_response(response) is None
+
+
+@pytest.mark.anyio
+async def test_base_auth_async_defers_to_sync():
+    auth = httpx.Auth()
+    request = httpx.Request("GET", "https://www.example.com")
+
+    assert await auth.async_authenticate_request(request) is request
+    response = httpx.Response(content=b"Hello, world!", status_code=200)
+    assert await auth.async_authenticate_response(response) is None
+
+
 def test_basic_auth():
     auth = httpx.BasicAuth(username="user", password="pass")
     request = httpx.Request("GET", "https://www.example.com")
 
     # The initial request should include a basic auth header.
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
+    request = auth.authenticate_request(request)
     assert request.headers["Authorization"].startswith("Basic")
 
     # No other requests are made.
     response = httpx.Response(content=b"Hello, world!", status_code=200)
-    with pytest.raises(StopIteration):
-        flow.send(response)
+    assert auth.authenticate_response(response) is None
 
 
 def test_digest_auth_with_200():
@@ -31,14 +49,12 @@ def test_digest_auth_with_200():
     request = httpx.Request("GET", "https://www.example.com")
 
     # The initial request should not include an auth header.
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
+    request = auth.authenticate_request(request)
     assert "Authorization" not in request.headers
 
     # If a 200 response is returned, then no other requests are made.
     response = httpx.Response(content=b"Hello, world!", status_code=200)
-    with pytest.raises(StopIteration):
-        flow.send(response)
+    assert auth.authenticate_response(response) is None
 
 
 def test_digest_auth_with_401():
@@ -46,8 +62,7 @@ def test_digest_auth_with_401():
     request = httpx.Request("GET", "https://www.example.com")
 
     # The initial request should not include an auth header.
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
+    request = auth.authenticate_request(request)
     assert "Authorization" not in request.headers
 
     # If a 401 response is returned, then a digest auth request is made.
@@ -57,13 +72,14 @@ def test_digest_auth_with_401():
     response = httpx.Response(
         content=b"Auth required", status_code=401, headers=headers, request=request
     )
-    request = flow.send(response)
+    next_request = auth.authenticate_response(response)
+    assert next_request is not None
+    request = next_request
     assert request.headers["Authorization"].startswith("Digest")
 
     # No other requests are made.
     response = httpx.Response(content=b"Hello, world!", status_code=200)
-    with pytest.raises(StopIteration):
-        flow.send(response)
+    assert auth.authenticate_response(response) is None
 
 
 def test_digest_auth_with_401_nonce_counting():
@@ -71,8 +87,7 @@ def test_digest_auth_with_401_nonce_counting():
     request = httpx.Request("GET", "https://www.example.com")
 
     # The initial request should not include an auth header.
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
+    request = auth.authenticate_request(request)
     assert "Authorization" not in request.headers
 
     # If a 401 response is returned, then a digest auth request is made.
@@ -82,13 +97,13 @@ def test_digest_auth_with_401_nonce_counting():
     response = httpx.Response(
         content=b"Auth required", status_code=401, headers=headers, request=request
     )
-    first_request = flow.send(response)
+    first_request = auth.authenticate_response(response)
+    assert first_request is not None
     assert first_request.headers["Authorization"].startswith("Digest")
 
     # Each subsequent request contains the digest header by default...
     request = httpx.Request("GET", "https://www.example.com")
-    flow = auth.sync_auth_flow(request)
-    second_request = next(flow)
+    second_request = auth.authenticate_request(request)
     assert second_request.headers["Authorization"].startswith("Digest")
 
     # ... and the client nonce count (nc) is increased
@@ -100,8 +115,7 @@ def test_digest_auth_with_401_nonce_counting():
 
     # No other requests are made.
     response = httpx.Response(content=b"Hello, world!", status_code=200)
-    with pytest.raises(StopIteration):
-        flow.send(response)
+    assert auth.authenticate_response(response) is None
 
 
 def set_cookies(request: httpx.Request) -> httpx.Response:
@@ -123,15 +137,16 @@ def test_digest_auth_setting_cookie_in_request():
     request = client.build_request("GET", url)
 
     auth = httpx.DigestAuth(username="user", password="pass")
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
+    request = auth.authenticate_request(request)
     assert "Authorization" not in request.headers
 
     response = client.get(url)
     assert len(response.cookies) > 0
     assert response.cookies["session"] == ".session_value..."
 
-    request = flow.send(response)
+    next_request = auth.authenticate_response(response)
+    assert next_request is not None
+    request = next_request
     assert request.headers["Authorization"].startswith("Digest")
     assert request.headers["Cookie"] == "session=.session_value..."
 
@@ -139,8 +154,7 @@ def test_digest_auth_setting_cookie_in_request():
     response = httpx.Response(
         content=b"Hello, world!", status_code=200, request=request
     )
-    with pytest.raises(StopIteration):
-        flow.send(response)
+    assert auth.authenticate_response(response) is None
 
 
 def test_digest_auth_rfc_2069():
@@ -151,8 +165,7 @@ def test_digest_auth_rfc_2069():
     request = httpx.Request("GET", "https://www.example.com/dir/index.html")
 
     # The initial request should not include an auth header.
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
+    request = auth.authenticate_request(request)
     assert "Authorization" not in request.headers
 
     # If a 401 response is returned, then a digest auth request is made.
@@ -166,7 +179,9 @@ def test_digest_auth_rfc_2069():
     response = httpx.Response(
         content=b"Auth required", status_code=401, headers=headers, request=request
     )
-    request = flow.send(response)
+    next_request = auth.authenticate_response(response)
+    assert next_request is not None
+    request = next_request
     assert request.headers["Authorization"].startswith("Digest")
     assert 'username="Mufasa"' in request.headers["Authorization"]
     assert 'realm="testrealm@host.com"' in request.headers["Authorization"]
@@ -184,8 +199,7 @@ def test_digest_auth_rfc_2069():
 
     # No other requests are made.
     response = httpx.Response(content=b"Hello, world!", status_code=200)
-    with pytest.raises(StopIteration):
-        flow.send(response)
+    assert auth.authenticate_response(response) is None
 
 
 def test_digest_auth_rfc_7616_md5(monkeypatch):
@@ -200,8 +214,7 @@ def test_digest_auth_rfc_7616_md5(monkeypatch):
     request = httpx.Request("GET", "https://www.example.com/dir/index.html")
 
     # The initial request should not include an auth header.
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
+    request = auth.authenticate_request(request)
     assert "Authorization" not in request.headers
 
     # If a 401 response is returned, then a digest auth request is made.
@@ -217,7 +230,9 @@ def test_digest_auth_rfc_7616_md5(monkeypatch):
     response = httpx.Response(
         content=b"Auth required", status_code=401, headers=headers, request=request
     )
-    request = flow.send(response)
+    next_request = auth.authenticate_response(response)
+    assert next_request is not None
+    request = next_request
     assert request.headers["Authorization"].startswith("Digest")
     assert 'username="Mufasa"' in request.headers["Authorization"]
     assert 'realm="http-auth@example.org"' in request.headers["Authorization"]
@@ -244,8 +259,7 @@ def test_digest_auth_rfc_7616_md5(monkeypatch):
 
     # No other requests are made.
     response = httpx.Response(content=b"Hello, world!", status_code=200)
-    with pytest.raises(StopIteration):
-        flow.send(response)
+    assert auth.authenticate_response(response) is None
 
 
 def test_digest_auth_rfc_7616_sha_256(monkeypatch):
@@ -260,8 +274,7 @@ def test_digest_auth_rfc_7616_sha_256(monkeypatch):
     request = httpx.Request("GET", "https://www.example.com/dir/index.html")
 
     # The initial request should not include an auth header.
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
+    request = auth.authenticate_request(request)
     assert "Authorization" not in request.headers
 
     # If a 401 response is returned, then a digest auth request is made.
@@ -277,7 +290,9 @@ def test_digest_auth_rfc_7616_sha_256(monkeypatch):
     response = httpx.Response(
         content=b"Auth required", status_code=401, headers=headers, request=request
     )
-    request = flow.send(response)
+    next_request = auth.authenticate_response(response)
+    assert next_request is not None
+    request = next_request
     assert request.headers["Authorization"].startswith("Digest")
     assert 'username="Mufasa"' in request.headers["Authorization"]
     assert 'realm="http-auth@example.org"' in request.headers["Authorization"]
@@ -304,5 +319,4 @@ def test_digest_auth_rfc_7616_sha_256(monkeypatch):
 
     # No other requests are made.
     response = httpx.Response(content=b"Hello, world!", status_code=200)
-    with pytest.raises(StopIteration):
-        flow.send(response)
+    assert auth.authenticate_response(response) is None

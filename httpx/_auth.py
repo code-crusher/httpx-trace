@@ -24,90 +24,56 @@ class Auth:
     Base class for all authentication schemes.
 
     To implement a custom authentication scheme, subclass `Auth` and override
-    the `.auth_flow()` method.
+    the `.authenticate_request()` method.
 
-    If the authentication scheme does I/O such as disk access or network calls, or uses
-    synchronization primitives such as locks, you should override `.sync_auth_flow()`
-    and/or `.async_auth_flow()` instead of `.auth_flow()` to provide specialized
-    implementations that will be used by `Client` and `AsyncClient` respectively.
+    Challenge-response authentication schemes may also override
+    `.authenticate_response()`, which allows a second request to optionally be
+    made once a server challenge is received.
     """
 
     requires_request_body = False
     requires_response_body = False
 
-    def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
+    def authenticate_request(self, request: Request) -> Request:
         """
-        Execute the authentication flow.
+        Authenticate the request, and return the request to send.
 
-        To dispatch a request, `yield` it:
-
-        ```
-        yield request
-        ```
-
-        The client will `.send()` the response back into the flow generator. You can
-        access it like so:
-
-        ```
-        response = yield request
-        ```
-
-        A `return` (or reaching the end of the generator) will result in the
-        client returning the last response obtained from the server.
-
-        You can dispatch as many requests as is necessary.
+        Most authentication schemes only need to override this method.
         """
-        yield request
+        return request
 
-    def sync_auth_flow(
-        self, request: Request
-    ) -> typing.Generator[Request, Response, None]:
+    def authenticate_response(self, response: Response) -> Request | None:
         """
-        Execute the authentication flow synchronously.
+        Authenticate the response, optionally returning a request to send.
 
-        By default, this defers to `.auth_flow()`. You should override this method
-        when the authentication scheme does I/O and/or uses concurrency primitives.
+        Challenge-response authentication schemes may override this method,
+        allowing a second request to be made once a server challenge is
+        received.
+
+        Returning `None` indicates that no further requests are required, and
+        that the response should be returned to the caller.
         """
-        if self.requires_request_body:
-            request.read()
+        return None
 
-        flow = self.auth_flow(request)
-        request = next(flow)
-
-        while True:
-            response = yield request
-            if self.requires_response_body:
-                response.read()
-
-            try:
-                request = flow.send(response)
-            except StopIteration:
-                break
-
-    async def async_auth_flow(
-        self, request: Request
-    ) -> typing.AsyncGenerator[Request, Response]:
+    async def async_authenticate_request(self, request: Request) -> Request:
         """
-        Execute the authentication flow asynchronously.
+        Authenticate the request asynchronously.
 
-        By default, this defers to `.auth_flow()`. You should override this method
-        when the authentication scheme does I/O and/or uses concurrency primitives.
+        By default, this defers to `.authenticate_request()`. You should override
+        this method when the authentication scheme does I/O and/or uses
+        concurrency primitives.
         """
-        if self.requires_request_body:
-            await request.aread()
+        return self.authenticate_request(request)
 
-        flow = self.auth_flow(request)
-        request = next(flow)
+    async def async_authenticate_response(self, response: Response) -> Request | None:
+        """
+        Authenticate the response asynchronously.
 
-        while True:
-            response = yield request
-            if self.requires_response_body:
-                await response.aread()
-
-            try:
-                request = flow.send(response)
-            except StopIteration:
-                break
+        By default, this defers to `.authenticate_response()`. You should override
+        this method when the authentication scheme does I/O and/or uses
+        concurrency primitives.
+        """
+        return self.authenticate_response(response)
 
 
 class FunctionAuth(Auth):
@@ -119,8 +85,8 @@ class FunctionAuth(Auth):
     def __init__(self, func: typing.Callable[[Request], Request]) -> None:
         self._func = func
 
-    def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
-        yield self._func(request)
+    def authenticate_request(self, request: Request) -> Request:
+        return self._func(request)
 
 
 class BasicAuth(Auth):
@@ -132,9 +98,9 @@ class BasicAuth(Auth):
     def __init__(self, username: str | bytes, password: str | bytes) -> None:
         self._auth_header = self._build_auth_header(username, password)
 
-    def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
+    def authenticate_request(self, request: Request) -> Request:
         request.headers["Authorization"] = self._auth_header
-        yield request
+        return request
 
     def _build_auth_header(self, username: str | bytes, password: str | bytes) -> str:
         userpass = b":".join((to_bytes(username), to_bytes(password)))
@@ -154,17 +120,17 @@ class NetRCAuth(Auth):
 
         self._netrc_info = netrc.netrc(file)
 
-    def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
+    def authenticate_request(self, request: Request) -> Request:
         auth_info = self._netrc_info.authenticators(request.url.host)
         if auth_info is None or not auth_info[2]:
             # The netrc file did not have authentication credentials for this host.
-            yield request
+            return request
         else:
             # Build a basic auth header with credentials from the netrc file.
             request.headers["Authorization"] = self._build_auth_header(
                 username=auth_info[0], password=auth_info[2]
             )
-            yield request
+            return request
 
     def _build_auth_header(self, username: str | bytes, password: str | bytes) -> str:
         userpass = b":".join((to_bytes(username), to_bytes(password)))
@@ -189,19 +155,25 @@ class DigestAuth(Auth):
         self._password = to_bytes(password)
         self._last_challenge: _DigestAuthChallenge | None = None
         self._nonce_count = 1
+        self._retried = False
 
-    def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
+    def authenticate_request(self, request: Request) -> Request:
+        self._retried = False
         if self._last_challenge:
             request.headers["Authorization"] = self._build_auth_header(
                 request, self._last_challenge
             )
+        return request
 
-        response = yield request
+    def authenticate_response(self, response: Response) -> Request | None:
+        if self._retried:
+            # Only a single retry is made in response to a challenge.
+            return None
 
         if response.status_code != 401 or "www-authenticate" not in response.headers:
             # If the response is not a 401 then we don't
             # need to build an authenticated request.
-            return
+            return None
 
         for auth_header in response.headers.get_list("www-authenticate"):
             if auth_header.lower().startswith("digest "):
@@ -209,17 +181,19 @@ class DigestAuth(Auth):
         else:
             # If the response does not include a 'WWW-Authenticate: Digest ...'
             # header, then we don't need to build an authenticated request.
-            return
+            return None
 
+        request = response.request
         self._last_challenge = self._parse_challenge(request, response, auth_header)
         self._nonce_count = 1
+        self._retried = True
 
         request.headers["Authorization"] = self._build_auth_header(
             request, self._last_challenge
         )
         if response.cookies:
             Cookies(response.cookies).set_cookie_header(request=request)
-        yield request
+        return request
 
     def _parse_challenge(
         self, request: Request, response: Response, auth_header: str

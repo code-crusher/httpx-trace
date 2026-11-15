@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Removed
 
 * Drop support for Python 3.8
+* Remove the `Auth.auth_flow()`, `Auth.sync_auth_flow()` and `Auth.async_auth_flow()`
+  generator-based authentication API. Custom authentication schemes should now
+  override `Auth.authenticate_request()` and optionally `Auth.authenticate_response()`.
+  (#3383)
 
 ### Added
 

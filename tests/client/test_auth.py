@@ -86,30 +86,39 @@ class DigestApp:
 
 class RepeatAuth(httpx.Auth):
     """
-    A mock authentication scheme that requires clients to send
-    the request a fixed number of times, and then send a last request containing
-    an aggregation of nonces that the server sent in 'WWW-Authenticate' headers
-    of intermediate responses.
+    A mock challenge-response authentication scheme that requires clients to
+    send the request a fixed number of times, and then send a last request
+    containing an aggregation of nonces that the server sent in
+    'WWW-Authenticate' headers of intermediate responses.
     """
 
     requires_request_body = True
 
     def __init__(self, repeat: int) -> None:
         self.repeat = repeat
+        self._index = 0
+        self._nonces: list[str] = []
 
-    def auth_flow(
-        self, request: httpx.Request
-    ) -> typing.Generator[httpx.Request, httpx.Response, None]:
-        nonces = []
+    def authenticate_request(self, request: httpx.Request) -> httpx.Request:
+        self._index = 0
+        self._nonces = []
+        request.headers["Authorization"] = f"Repeat {self._index}"
+        return request
 
-        for index in range(self.repeat):
-            request.headers["Authorization"] = f"Repeat {index}"
-            response = yield request
-            nonces.append(response.headers["www-authenticate"])
+    def authenticate_response(self, response: httpx.Response) -> httpx.Request | None:
+        if self._index >= self.repeat:
+            return None
 
-        key = ".".join(nonces)
-        request.headers["Authorization"] = f"Repeat {key}"
-        yield request
+        self._nonces.append(response.headers["www-authenticate"])
+        self._index += 1
+
+        request = response.request
+        if self._index < self.repeat:
+            request.headers["Authorization"] = f"Repeat {self._index}"
+        else:
+            key = ".".join(self._nonces)
+            request.headers["Authorization"] = f"Repeat {key}"
+        return request
 
 
 class ResponseBodyAuth(httpx.Auth):
@@ -123,15 +132,21 @@ class ResponseBodyAuth(httpx.Auth):
 
     def __init__(self, token: str) -> None:
         self.token = token
+        self._authenticated = False
 
-    def auth_flow(
-        self, request: httpx.Request
-    ) -> typing.Generator[httpx.Request, httpx.Response, None]:
+    def authenticate_request(self, request: httpx.Request) -> httpx.Request:
+        self._authenticated = False
         request.headers["Authorization"] = self.token
-        response = yield request
-        data = response.text
-        request.headers["Authorization"] = data
-        yield request
+        return request
+
+    def authenticate_response(self, response: httpx.Response) -> httpx.Request | None:
+        if self._authenticated:
+            return None
+
+        self._authenticated = True
+        request = response.request
+        request.headers["Authorization"] = response.text
+        return request
 
 
 class SyncOrAsyncAuth(httpx.Auth):
@@ -144,19 +159,15 @@ class SyncOrAsyncAuth(httpx.Auth):
         self._lock = threading.Lock()
         self._async_lock = anyio.Lock()
 
-    def sync_auth_flow(
-        self, request: httpx.Request
-    ) -> typing.Generator[httpx.Request, httpx.Response, None]:
+    def authenticate_request(self, request: httpx.Request) -> httpx.Request:
         with self._lock:
             request.headers["Authorization"] = "sync-auth"
-        yield request
+        return request
 
-    async def async_auth_flow(
-        self, request: httpx.Request
-    ) -> typing.AsyncGenerator[httpx.Request, httpx.Response]:
+    async def async_authenticate_request(self, request: httpx.Request) -> httpx.Request:
         async with self._async_lock:
             request.headers["Authorization"] = "async-auth"
-        yield request
+        return request
 
 
 @pytest.mark.anyio

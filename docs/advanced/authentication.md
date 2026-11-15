@@ -93,38 +93,42 @@ When issuing requests or instantiating a client, the `auth` argument can be used
 * A callable, accepting a request and returning an authenticated request instance.
 * An instance of subclasses of `httpx.Auth`.
 
-The most involved of these is the last, which allows you to create authentication flows involving one or more requests. A subclass of `httpx.Auth` should implement `def auth_flow(request)`, and yield any requests that need to be made...
+The most involved of these is the last. A subclass of `httpx.Auth` should implement `def authenticate_request(request)`, which takes the request and returns the authenticated request to send. Most authentication schemes only need to override this method...
 
 ```python
 class MyCustomAuth(httpx.Auth):
     def __init__(self, token):
         self.token = token
 
-    def auth_flow(self, request):
+    def authenticate_request(self, request):
         # Send the request, with a custom `X-Authentication` header.
         request.headers['X-Authentication'] = self.token
-        yield request
+        return request
 ```
 
-If the auth flow requires more than one request, you can issue multiple yields, and obtain the response in each case...
+Challenge-response authentication schemes, such as digest authentication, may also implement `def authenticate_response(response)`. This is called with the response to the request that was sent, and may return a new request to send. Returning `None` indicates that no further requests are required, and that the response should be returned to the caller.
 
 ```python
 class MyCustomAuth(httpx.Auth):
     def __init__(self, token):
         self.token = token
 
-    def auth_flow(self, request):
-      response = yield request
-      if response.status_code == 401:
-          # If the server issues a 401 response then resend the request,
-          # with a custom `X-Authentication` header.
-          request.headers['X-Authentication'] = self.token
-          yield request
+    def authenticate_request(self, request):
+        return request
+
+    def authenticate_response(self, response):
+        if response.status_code == 401:
+            # If the server issues a 401 response then resend the request,
+            # with a custom `X-Authentication` header.
+            request = response.request
+            request.headers['X-Authentication'] = self.token
+            return request
+        return None
 ```
 
 Custom authentication classes are designed to not perform any I/O, so that they may be used with both sync and async client instances. If you are implementing an authentication scheme that requires the request body, then you need to indicate this on the class using a `requires_request_body` property.
 
-You will then be able to access `request.content` inside the `.auth_flow()` method.
+You will then be able to access `request.content` inside the `.authenticate_request()` method.
 
 ```python
 class MyCustomAuth(httpx.Auth):
@@ -133,56 +137,28 @@ class MyCustomAuth(httpx.Auth):
     def __init__(self, token):
         self.token = token
 
-    def auth_flow(self, request):
-      response = yield request
-      if response.status_code == 401:
-          # If the server issues a 401 response then resend the request,
-          # with a custom `X-Authentication` header.
-          request.headers['X-Authentication'] = self.sign_request(...)
-          yield request
+    def authenticate_request(self, request):
+        # Sign the request, based on `request.method`, `request.url`,
+        # `request.headers`, and `request.content`.
+        request.headers['X-Authentication'] = self.sign_request(request)
+        return request
 
     def sign_request(self, request):
-        # Create a request signature, based on `request.method`, `request.url`,
-        # `request.headers`, and `request.content`.
         ...
 ```
 
-Similarly, if you are implementing a scheme that requires access to the response body, then use the `requires_response_body` property.   You will then be able to access response body properties and methods such as `response.content`, `response.text`, `response.json()`, etc.
+Similarly, if you are implementing a scheme that requires access to the response body, then use the `requires_response_body` property. You will then be able to access response body properties and methods such as `response.content`, `response.text`, `response.json()`, etc.
 
 ```python
 class MyCustomAuth(httpx.Auth):
     requires_response_body = True
 
-    def __init__(self, access_token, refresh_token, refresh_url):
-        self.access_token = access_token
-        self.refresh_token = refresh_token
-        self.refresh_url = refresh_url
-
-    def auth_flow(self, request):
-        request.headers["X-Authentication"] = self.access_token
-        response = yield request
-
-        if response.status_code == 401:
-            # If the server issues a 401 response, then issue a request to
-            # refresh tokens, and resend the request.
-            refresh_response = yield self.build_refresh_request()
-            self.update_tokens(refresh_response)
-
-            request.headers["X-Authentication"] = self.access_token
-            yield request
-
-    def build_refresh_request(self):
-        # Return an `httpx.Request` for refreshing tokens.
-        ...
-
-    def update_tokens(self, response):
-        # Update the `.access_token` and `.refresh_token` tokens
-        # based on a refresh response.
+    def authenticate_response(self, response):
         data = response.json()
         ...
 ```
 
-If you _do_ need to perform I/O other than HTTP requests, such as accessing a disk-based cache, or you need to use concurrency primitives, such as locks, then you should override `.sync_auth_flow()` and `.async_auth_flow()` (instead of `.auth_flow()`). The former will be used by `httpx.Client`, while the latter will be used by `httpx.AsyncClient`.
+If you _do_ need to perform I/O other than HTTP requests, such as accessing a disk-based cache, or you need to use concurrency primitives, such as locks, then you should override `.async_authenticate_request()` and `.async_authenticate_response()` (in addition to the sync methods). The former pair will be used by `httpx.AsyncClient`, while the latter pair will be used by `httpx.Client`.
 
 ```python
 import asyncio
@@ -199,22 +175,22 @@ class MyCustomAuth(httpx.Auth):
         with self._sync_lock:
             ...
 
-    def sync_auth_flow(self, request):
+    def authenticate_request(self, request):
         token = self.sync_get_token()
         request.headers["Authorization"] = f"Token {token}"
-        yield request
+        return request
 
     async def async_get_token(self):
         async with self._async_lock:
             ...
 
-    async def async_auth_flow(self, request):
+    async def async_authenticate_request(self, request):
         token = await self.async_get_token()
         request.headers["Authorization"] = f"Token {token}"
-        yield request
+        return request
 ```
 
-If you only want to support one of the two methods, then you should still override it, but raise an explicit `RuntimeError`.
+If you only want to support one of the two client types, then you should override the async method to raise an explicit `RuntimeError`.
 
 ```python
 import httpx
@@ -222,11 +198,13 @@ import sync_only_library
 
 
 class MyCustomAuth(httpx.Auth):
-    def sync_auth_flow(self, request):
+    def authenticate_request(self, request):
         token = sync_only_library.get_token(...)
         request.headers["Authorization"] = f"Token {token}"
-        yield request
+        return request
 
-    async def async_auth_flow(self, request):
+    async def async_authenticate_request(self, request):
         raise RuntimeError("Cannot use a sync authentication class with httpx.AsyncClient")
 ```
+
+Authentication schemes that need to make additional HTTP requests as part of the authentication exchange, such as issuing a request to refresh an access token, are not supported by the `Auth` API. For those cases you should use the [Transport API](transports.md) instead, which allows you to customise the entire request/response implementation.

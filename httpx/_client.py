@@ -934,32 +934,33 @@ class Client(BaseClient):
         follow_redirects: bool,
         history: list[Response],
     ) -> Response:
-        auth_flow = auth.sync_auth_flow(request)
-        try:
-            request = next(auth_flow)
+        if auth.requires_request_body:
+            request.read()
 
-            while True:
-                response = self._send_handling_redirects(
-                    request,
-                    follow_redirects=follow_redirects,
-                    history=history,
-                )
-                try:
-                    try:
-                        next_request = auth_flow.send(response)
-                    except StopIteration:
-                        return response
+        request = auth.authenticate_request(request)
 
-                    response.history = list(history)
+        while True:
+            response = self._send_handling_redirects(
+                request,
+                follow_redirects=follow_redirects,
+                history=history,
+            )
+            try:
+                if auth.requires_response_body:
                     response.read()
-                    request = next_request
-                    history.append(response)
 
-                except BaseException as exc:
-                    response.close()
-                    raise exc
-        finally:
-            auth_flow.close()
+                next_request = auth.authenticate_response(response)
+                if next_request is None:
+                    return response
+
+                response.history = list(history)
+                response.read()
+                request = next_request
+                history.append(response)
+
+            except BaseException as exc:
+                response.close()
+                raise exc
 
     def _send_handling_redirects(
         self,
@@ -1649,32 +1650,33 @@ class AsyncClient(BaseClient):
         follow_redirects: bool,
         history: list[Response],
     ) -> Response:
-        auth_flow = auth.async_auth_flow(request)
-        try:
-            request = await auth_flow.__anext__()
+        if auth.requires_request_body:
+            await request.aread()
 
-            while True:
-                response = await self._send_handling_redirects(
-                    request,
-                    follow_redirects=follow_redirects,
-                    history=history,
-                )
-                try:
-                    try:
-                        next_request = await auth_flow.asend(response)
-                    except StopAsyncIteration:
-                        return response
+        request = await auth.async_authenticate_request(request)
 
-                    response.history = list(history)
+        while True:
+            response = await self._send_handling_redirects(
+                request,
+                follow_redirects=follow_redirects,
+                history=history,
+            )
+            try:
+                if auth.requires_response_body:
                     await response.aread()
-                    request = next_request
-                    history.append(response)
 
-                except BaseException as exc:
-                    await response.aclose()
-                    raise exc
-        finally:
-            await auth_flow.aclose()
+                next_request = await auth.async_authenticate_response(response)
+                if next_request is None:
+                    return response
+
+                response.history = list(history)
+                await response.aread()
+                request = next_request
+                history.append(response)
+
+            except BaseException as exc:
+                await response.aclose()
+                raise exc
 
     async def _send_handling_redirects(
         self,
