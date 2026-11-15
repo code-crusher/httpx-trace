@@ -344,7 +344,7 @@ async def test_multipart_data_and_files_content():
 
 @pytest.mark.anyio
 async def test_empty_request():
-    request = httpx.Request(method, url, data={}, files={})
+    request = httpx.Request(method, url, data={}, files=None)
     assert isinstance(request.stream, typing.Iterable)
     assert isinstance(request.stream, typing.AsyncIterable)
 
@@ -354,6 +354,36 @@ async def test_empty_request():
     assert request.headers == {"Host": "www.example.com", "Content-Length": "0"}
     assert sync_content == b""
     assert async_content == b""
+
+
+@pytest.mark.anyio
+async def test_multipart_empty_files_content():
+    data = {"message": "Hello, world!"}
+    files: dict[str, typing.Any] = {}
+    headers = {"Content-Type": "multipart/form-data; boundary=+++"}
+    request = httpx.Request(method, url, data=data, files=files, headers=headers)
+    assert isinstance(request.stream, typing.Iterable)
+    assert isinstance(request.stream, typing.AsyncIterable)
+
+    sync_content = b"".join(list(request.stream))
+    async_content = b"".join([part async for part in request.stream])
+
+    assert request.headers == {
+        "Host": "www.example.com",
+        "Content-Length": "81",
+        "Content-Type": "multipart/form-data; boundary=+++",
+    }
+    expected_content = b"".join(
+        [
+            b"--+++\r\n",
+            b'Content-Disposition: form-data; name="message"\r\n',
+            b"\r\n",
+            b"Hello, world!\r\n",
+            b"--+++--\r\n",
+        ]
+    )
+    assert sync_content == expected_content
+    assert async_content == expected_content
 
 
 def test_invalid_argument():
