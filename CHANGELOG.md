@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 * Expose `FunctionAuth` from the public API. (#3699)
 
+### Fixed
+
+* Include the header name in `UnicodeEncodeError` messages raised when a header value cannot be encoded. (#3400)
+
 ## 0.28.1 (6th December, 2024)
 
 * Fix SSL case where `verify=False` together with client side certificates.
