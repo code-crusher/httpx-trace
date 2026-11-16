@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 * Expose `FunctionAuth` from the public API. (#3699)
 
+### Fixed
+
+* Include a helpful hint in the message of `ConnectError` when a TLS
+  `WRONG_VERSION_NUMBER`/`RECORD_LAYER_FAILURE` error is encountered, since
+  this commonly indicates a stale pooled keep-alive connection. (#3713)
+
 ## 0.28.1 (6th December, 2024)
 
 * Fix SSL case where `verify=False` together with client side certificates.

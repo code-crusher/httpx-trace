@@ -115,6 +115,14 @@ def map_httpcore_exceptions() -> typing.Iterator[None]:
             raise
 
         message = str(exc)
+        if "WRONG_VERSION_NUMBER" in message or "RECORD_LAYER_FAILURE" in message:
+            message += (
+                " This can occur when a pooled keep-alive connection was closed "
+                "by the server and is then reused, or when connecting to an "
+                "HTTP server over HTTPS. Consider reducing the connection pool's "
+                "`keepalive_expiry` (e.g. `httpx.Limits(keepalive_expiry=...)`) "
+                "or retrying the request."
+            )
         raise mapped_exc(message) from exc
 
 
