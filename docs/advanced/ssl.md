@@ -6,7 +6,7 @@ By default httpx will verify HTTPS connections, and raise an error for invalid S
 
 ```pycon
 >>> httpx.get("https://expired.badssl.com/")
-httpx.ConnectError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate has expired (_ssl.c:997)
+httpx.SSLError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate has expired (_ssl.c:997)
 ```
 
 You can disable SSL verification completely and allow insecure requests...

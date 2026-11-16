@@ -47,6 +47,7 @@ from .._exceptions import (
     ReadError,
     ReadTimeout,
     RemoteProtocolError,
+    SSLError,
     TimeoutException,
     UnsupportedProtocol,
     WriteError,
@@ -92,6 +93,41 @@ def _load_httpcore_exceptions() -> dict[type[Exception], type[httpx.HTTPError]]:
     }
 
 
+def _is_ssl_error(exc: Exception) -> bool:
+    """
+    Check if the given exception (or any of its causes/contexts) is an
+    `ssl.SSLError`.
+
+    httpcore raises `ConnectError` for TLS handshake failures, so we need to
+    look for the underlying `ssl.SSLError` in the exception chain.
+    """
+    import ssl
+
+    for err in _exc_chain(exc):
+        if isinstance(err, ssl.SSLError):
+            return True
+    return False
+
+
+def _exc_chain(exc: Exception) -> typing.Iterator[BaseException]:
+    """
+    Iterate over an exception and its causes/contexts, without cycles.
+    """
+    seen = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:  # pragma: no cover
+            # Exception chains are guaranteed to be acyclic in Python.
+            continue
+        seen.add(id(current))
+        yield current
+        if current.__cause__ is not None:
+            stack.append(current.__cause__)
+        if current.__context__ is not None:
+            stack.append(current.__context__)
+
+
 @contextlib.contextmanager
 def map_httpcore_exceptions() -> typing.Iterator[None]:
     global HTTPCORE_EXC_MAP
@@ -113,6 +149,11 @@ def map_httpcore_exceptions() -> typing.Iterator[None]:
 
         if mapped_exc is None:  # pragma: no cover
             raise
+
+        # SSL errors are raised as `ConnectError` by httpcore, but we want to
+        # raise `SSLError` for them, which is a subclass of `ConnectError`.
+        if mapped_exc is ConnectError and _is_ssl_error(exc):
+            mapped_exc = SSLError
 
         message = str(exc)
         raise mapped_exc(message) from exc

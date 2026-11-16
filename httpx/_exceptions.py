@@ -11,6 +11,7 @@ Our exception hierarchy:
         · PoolTimeout
       - NetworkError
         · ConnectError
+          - SSLError
         · ReadError
         · WriteError
         · CloseError
@@ -59,6 +60,7 @@ __all__ = [
     "RequestError",
     "RequestNotRead",
     "ResponseNotRead",
+    "SSLError",
     "StreamClosed",
     "StreamConsumed",
     "StreamError",
@@ -187,6 +189,14 @@ class WriteError(NetworkError):
 class ConnectError(NetworkError):
     """
     Failed to establish a connection.
+    """
+
+
+class SSLError(ConnectError):
+    """
+    An SSL error occurred.
+
+    For example, during a TLS handshake with an invalid certificate.
     """
 
 
