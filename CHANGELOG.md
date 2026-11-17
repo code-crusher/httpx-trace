@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 * Expose `FunctionAuth` from the public API. (#3699)
 
+### Fixed
+
+* Apply the request's connect timeout to the SOCKS5 handshake, so a SOCKS
+  proxy that accepts the TCP connection but never responds raises
+  `ConnectTimeout` instead of hanging indefinitely. (#3626)
+
 ## 0.28.1 (6th December, 2024)
 
 * Fix SSL case where `verify=False` together with client side certificates.

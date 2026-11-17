@@ -193,7 +193,9 @@ class HTTPTransport(BaseTransport):
                     "Make sure to install httpx using `pip install httpx[socks]`."
                 ) from None
 
-            self._pool = httpcore.SOCKSProxy(
+            from .socks import SOCKSProxy
+
+            self._pool = SOCKSProxy(
                 proxy_url=httpcore.URL(
                     scheme=proxy.url.raw_scheme,
                     host=proxy.url.raw_host,
@@ -337,7 +339,9 @@ class AsyncHTTPTransport(AsyncBaseTransport):
                     "Make sure to install httpx using `pip install httpx[socks]`."
                 ) from None
 
-            self._pool = httpcore.AsyncSOCKSProxy(
+            from .socks import AsyncSOCKSProxy
+
+            self._pool = AsyncSOCKSProxy(
                 proxy_url=httpcore.URL(
                     scheme=proxy.url.raw_scheme,
                     host=proxy.url.raw_host,

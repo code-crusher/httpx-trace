@@ -1,3 +1,8 @@
+import contextlib
+import socket
+import threading
+import time
+
 import httpcore
 import pytest
 
@@ -263,3 +268,79 @@ def test_proxy_with_mounts():
 
     transport = client._transport_for_url(httpx.URL("http://example.com"))
     assert transport == proxy_transport
+
+
+class BlackHoleSOCKSServer:
+    """
+    A fake SOCKS5 server that accepts the TCP connection and then never
+    sends a response, simulating a proxy that hangs during the SOCKS5
+    handshake.
+    """
+
+    def __init__(self) -> None:
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._socket.bind(("127.0.0.1", 0))
+        self._socket.listen(1)
+        self._socket.settimeout(0.5)
+        self.port = self._socket.getsockname()[1]
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    def __enter__(self) -> "BlackHoleSOCKSServer":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self._socket.close()
+        self._thread.join(timeout=5.0)
+
+    def _serve(self) -> None:
+        while True:
+            try:
+                conn, _ = self._socket.accept()
+            except OSError:
+                # Socket closed by `__exit__`.
+                break
+            with contextlib.closing(conn):
+                conn.settimeout(5.0)
+                try:
+                    conn.recv(4096)  # read the SOCKS5 greeting, never reply
+                    # Hold the connection open until the client gives up,
+                    # or the server is torn down.
+                    while True:
+                        if not conn.recv(4096):
+                            break
+                except OSError:
+                    pass
+
+
+def _proxy_url(port: int) -> str:
+    return f"socks5://127.0.0.1:{port}"
+
+
+def test_socks_proxy_connect_timeout_during_handshake():
+    """
+    A SOCKS proxy that accepts the TCP connection but never responds
+    to the SOCKS5 handshake should trigger a `ConnectTimeout` once the
+    configured connect timeout elapses. See encode/httpx#3626.
+    """
+    with BlackHoleSOCKSServer() as server:
+        proxy = _proxy_url(server.port)
+        timeout = httpx.Timeout(1.0, connect=0.5)
+        with httpx.Client(proxy=proxy, timeout=timeout) as client:
+            start = time.monotonic()
+            with pytest.raises(httpx.ConnectTimeout):
+                client.get("http://example.org/")
+            assert time.monotonic() - start < 5.0
+
+
+@pytest.mark.anyio
+async def test_socks_proxy_connect_timeout_during_handshake_async():
+    with BlackHoleSOCKSServer() as server:
+        proxy = _proxy_url(server.port)
+        timeout = httpx.Timeout(1.0, connect=0.5)
+        async with httpx.AsyncClient(proxy=proxy, timeout=timeout) as client:
+            start = time.monotonic()
+            with pytest.raises(httpx.ConnectTimeout):
+                await client.get("http://example.org/")
+            assert time.monotonic() - start < 5.0
