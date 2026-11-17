@@ -295,6 +295,25 @@ class MultipartStream(SyncByteStream, AsyncByteStream):
         for chunk in self.iter_chunks():
             yield chunk
 
-    async def __aiter__(self) -> typing.AsyncIterator[bytes]:
-        for chunk in self.iter_chunks():
-            yield chunk
+    def __aiter__(self) -> typing.AsyncIterator[bytes]:
+        # Returning a plain async iterator, rather than using an async
+        # generator here, ensures that if the request is cancelled part way
+        # through sending the request body, we don't leave a suspended
+        # async generator to be later finalized by the async framework.
+        # (Which would otherwise raise a `ResourceWarning` on Trio.)
+        return AsyncMultipartStreamIterator(self)
+
+
+class AsyncMultipartStreamIterator(AsyncByteStream):
+    def __init__(self, stream: MultipartStream) -> None:
+        self._stream = stream
+        self._chunks = iter(stream.iter_chunks())
+
+    def __aiter__(self) -> typing.AsyncIterator[bytes]:
+        return self
+
+    async def __anext__(self) -> bytes:
+        try:
+            return next(self._chunks)
+        except StopIteration:
+            raise StopAsyncIteration from None

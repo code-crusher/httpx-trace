@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 * Expose `FunctionAuth` from the public API. (#3699)
+* Add support for Python 3.14. (#3686)
+
+### Fixed
+
+* Ensure request byte streams do not leave a suspended async generator behind when a request is
+  cancelled part way through sending the request body. This could otherwise raise a spurious
+  `ResourceWarning` on Trio, such as when a write timeout occurs. (#3686)
 
 ## 0.28.1 (6th December, 2024)
 

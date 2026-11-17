@@ -35,8 +35,29 @@ class ByteStream(AsyncByteStream, SyncByteStream):
     def __iter__(self) -> Iterator[bytes]:
         yield self._stream
 
-    async def __aiter__(self) -> AsyncIterator[bytes]:
-        yield self._stream
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        # Returning a plain async iterator, rather than using an async
+        # generator here, ensures that if the request is cancelled part way
+        # through sending the request body, we don't leave a suspended
+        # async generator to be later finalized by the async framework.
+        # (Which would otherwise raise a `ResourceWarning` on Trio.)
+        return AsyncByteStreamIterator(self._stream)
+
+
+class AsyncByteStreamIterator(AsyncByteStream):
+    def __init__(self, stream: bytes) -> None:
+        self._stream = stream
+        self._yielded = False
+
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._yielded:
+            raise StopAsyncIteration
+
+        self._yielded = True
+        return self._stream
 
 
 class IteratorByteStream(SyncByteStream):
@@ -72,21 +93,32 @@ class AsyncIteratorByteStream(AsyncByteStream):
         self._is_stream_consumed = False
         self._is_generator = inspect.isasyncgen(stream)
 
-    async def __aiter__(self) -> AsyncIterator[bytes]:
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        # Returning a plain async iterator, rather than using an async
+        # generator here, ensures that if the request is cancelled part way
+        # through sending the request body, we don't leave a suspended
+        # async generator to be later finalized by the async framework.
+        # (Which would otherwise raise a `ResourceWarning` on Trio.)
         if self._is_stream_consumed and self._is_generator:
             raise StreamConsumed()
 
         self._is_stream_consumed = True
+        return self
+
+    async def __anext__(self) -> bytes:
         if hasattr(self._stream, "aread"):
             # File-like interfaces should use 'aread' directly.
-            chunk = await self._stream.aread(self.CHUNK_SIZE)
-            while chunk:
-                yield chunk
-                chunk = await self._stream.aread(self.CHUNK_SIZE)
-        else:
-            # Otherwise iterate.
-            async for part in self._stream:
-                yield part
+            chunk: bytes = await self._stream.aread(self.CHUNK_SIZE)
+            if not chunk:
+                raise StopAsyncIteration
+
+            return chunk
+
+        # Otherwise iterate.
+        async for part in self._stream:
+            return b"" if part is None else part
+
+        raise StopAsyncIteration
 
 
 class UnattachedStream(AsyncByteStream, SyncByteStream):
