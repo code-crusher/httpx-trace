@@ -269,19 +269,33 @@ class TestServer(Server):
 
 
 def serve_in_thread(server: TestServer) -> typing.Iterator[TestServer]:
-    thread = threading.Thread(target=server.run)
+    # The thread is a daemon and both waits are bounded, so that a server that
+    # fails to start (or fails to shut down) surfaces an error instead of
+    # hanging the test suite. Ref: https://github.com/encode/httpx/issues/3708
+    thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     try:
+        deadline = time.monotonic() + 10
         while not server.started:
+            if not thread.is_alive():
+                raise RuntimeError("Test server failed to start.")
+            if time.monotonic() > deadline:
+                raise RuntimeError("Test server failed to start in time.")
             time.sleep(1e-3)
         yield server
     finally:
         server.should_exit = True
-        thread.join()
+        thread.join(timeout=10)
 
 
 @pytest.fixture(scope="session")
 def server() -> typing.Iterator[TestServer]:
-    config = Config(app=app, lifespan="off", loop="asyncio")
+    # WebSockets support is explicitly disabled: the test ASGI app only handles
+    # HTTP, and importing uvicorn's WebSockets support pulls in the deprecated
+    # `websockets.legacy` API on websockets>=14, which raises a DeprecationWarning.
+    # Since our tests treat warnings as errors, that used to kill the server
+    # thread and hang the test suite.
+    # Ref: https://github.com/encode/httpx/issues/3708
+    config = Config(app=app, lifespan="off", loop="asyncio", ws="none")
     server = TestServer(config=config)
     yield from serve_in_thread(server)
