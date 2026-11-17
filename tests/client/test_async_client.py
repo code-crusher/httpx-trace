@@ -373,3 +373,33 @@ async def test_server_extensions(server):
         response = await client.get(url)
     assert response.status_code == 200
     assert response.extensions["http_version"] == b"HTTP/1.1"
+
+
+@pytest.mark.anyio
+async def test_mock_transport_elapsed():
+    # Regression test for https://github.com/encode/httpx/issues/3712
+    # Responses returned by a MockTransport handler should have `.elapsed`
+    # set, without requiring the handler to set it explicitly.
+    def handler(request):
+        return httpx.Response(200, json={"text": "Hello, world!"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        response = await client.get("https://www.example.com")
+        assert response.status_code == 200
+        assert response.elapsed == timedelta(0)
+
+
+@pytest.mark.anyio
+async def test_mock_transport_elapsed_set_by_handler():
+    # A handler that explicitly sets `.elapsed` should have its value
+    # preserved, rather than being overwritten.
+    def handler(request):
+        response = httpx.Response(200, json={"text": "Hello, world!"})
+        response.elapsed = timedelta(seconds=2.5)
+        return response
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        response = await client.get("https://www.example.com")
+        assert response.elapsed == timedelta(seconds=2.5)

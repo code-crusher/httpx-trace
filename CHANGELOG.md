@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 * Expose `FunctionAuth` from the public API. (#3699)
+* `MockTransport` now sets `response.elapsed` on responses returned by its handler, defaulting to `timedelta(0)` and preserving any value already set by the handler. (#3712)
 
 ## 0.28.1 (6th December, 2024)
 

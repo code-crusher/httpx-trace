@@ -460,3 +460,31 @@ def test_client_decode_text_using_explicit_encoding():
         assert response.reason_phrase == "OK"
         assert response.encoding == "ISO-8859-1"
         assert response.text == text
+
+
+def test_mock_transport_elapsed():
+    # Regression test for https://github.com/encode/httpx/issues/3712
+    # Responses returned by a MockTransport handler should have `.elapsed`
+    # set, without requiring the handler to set it explicitly.
+    def handler(request):
+        return httpx.Response(200, json={"text": "Hello, world!"})
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        response = client.get("https://www.example.com")
+        assert response.status_code == 200
+        assert response.elapsed == timedelta(0)
+
+
+def test_mock_transport_elapsed_set_by_handler():
+    # A handler that explicitly sets `.elapsed` should have its value
+    # preserved, rather than being overwritten.
+    def handler(request):
+        response = httpx.Response(200, json={"text": "Hello, world!"})
+        response.elapsed = timedelta(seconds=2.5)
+        return response
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        response = client.get("https://www.example.com")
+        assert response.elapsed == timedelta(seconds=2.5)
