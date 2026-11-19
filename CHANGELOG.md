@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 * Expose `FunctionAuth` from the public API. (#3699)
 
+### Fixed
+
+* Fix `RuntimeError: deque mutated during iteration` and related state corruption
+  errors when a synchronous client with HTTP/2 support is shared between threads.
+  Concurrent in-flight requests are now assigned separate connections, so that
+  the HTTP/2 state machine is only ever operated on by a single thread at a time. (#3566)
+
 ## 0.28.1 (6th December, 2024)
 
 * Fix SSL case where `verify=False` together with client side certificates.

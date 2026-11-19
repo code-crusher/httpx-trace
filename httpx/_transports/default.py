@@ -27,11 +27,14 @@ client = httpx.Client(transport=transport)
 from __future__ import annotations
 
 import contextlib
+import threading
 import typing
 from types import TracebackType
 
 if typing.TYPE_CHECKING:
     import ssl  # pragma: no cover
+
+    import httpcore  # pragma: no cover
 
     import httpx  # pragma: no cover
 
@@ -59,6 +62,7 @@ from .base import AsyncBaseTransport, BaseTransport
 
 T = typing.TypeVar("T", bound="HTTPTransport")
 A = typing.TypeVar("A", bound="AsyncHTTPTransport")
+P = typing.TypeVar("P", bound="httpcore.ConnectionPool")
 
 SOCKET_OPTION = typing.Union[
     typing.Tuple[int, int, int],
@@ -132,6 +136,119 @@ class ResponseStream(SyncByteStream):
             self._httpcore_stream.close()
 
 
+class _SingleFlightStream:
+    """
+    Wraps the response stream of a `_SingleFlightConnection`, releasing the
+    connection for further use once the response has been closed.
+    """
+
+    def __init__(
+        self, stream: typing.Iterable[bytes], connection: _SingleFlightConnection
+    ) -> None:
+        self._stream = stream
+        self._connection = connection
+        self._closed = False
+
+    def __iter__(self) -> typing.Iterator[bytes]:
+        for part in self._stream:
+            yield part
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            try:
+                if hasattr(self._stream, "close"):
+                    self._stream.close()
+            finally:
+                self._connection._release()
+
+
+class _SingleFlightConnection:
+    """
+    Wraps an httpcore connection so that at most one request is ever in flight
+    on it at a time.
+
+    HTTP/1.1 connections in httpcore already enforce this, raising
+    `ConnectionNotAvailable` for concurrent requests, so that the connection
+    pool hands each in-flight request its own connection. HTTP/2 connections
+    instead accept concurrent requests, so that streams can be multiplexed
+    onto a single connection. However the HTTP/2 state machine (including the
+    HPACK encoder and decoder) is not thread-safe, so a sync client that is
+    shared between threads would corrupt it, raising errors such as
+    `RuntimeError: deque mutated during iteration`. (#3566)
+
+    Requiring exclusive use of a connection for the duration of a request
+    restores the HTTP/1.1 invariant, so that the shared HTTP/2 state is only
+    ever operated on by one thread at a time. Requests that would have been
+    multiplexed are instead assigned to separate connections by the pool.
+    """
+
+    def __init__(self, connection: httpcore.ConnectionInterface) -> None:
+        self._connection = connection
+        self._lock = threading.Lock()
+        self._in_flight = False
+
+    def handle_request(self, request: httpcore.Request) -> httpcore.Response:
+        import httpcore
+
+        with self._lock:
+            if self._in_flight:
+                raise httpcore.ConnectionNotAvailable()
+            self._in_flight = True
+
+        try:
+            response = self._connection.handle_request(request)
+            assert isinstance(response.stream, typing.Iterable)
+        except BaseException:
+            self._release()
+            raise
+
+        return httpcore.Response(
+            status=response.status,
+            headers=response.headers,
+            content=_SingleFlightStream(response.stream, self),
+            extensions=response.extensions,
+        )
+
+    def _release(self) -> None:
+        with self._lock:
+            self._in_flight = False
+
+    def close(self) -> None:
+        self._connection.close()
+
+    def info(self) -> str:
+        return self._connection.info()
+
+    def can_handle_request(self, origin: httpcore.Origin) -> bool:
+        return self._connection.can_handle_request(origin)
+
+    def is_available(self) -> bool:
+        return not self._in_flight and self._connection.is_available()
+
+    def has_expired(self) -> bool:
+        return self._connection.has_expired()
+
+    def is_idle(self) -> bool:
+        return self._connection.is_idle()
+
+    def is_closed(self) -> bool:
+        return self._connection.is_closed()
+
+
+def _single_flight_pool_class(base_class: type[P]) -> type[P]:
+    """
+    Return an httpcore connection pool subclass, which wraps its connections
+    in `_SingleFlightConnection`.
+    """
+
+    class _SingleFlightPool(base_class):  # type: ignore[misc, valid-type]
+        def create_connection(self, origin: httpcore.Origin) -> typing.Any:
+            return _SingleFlightConnection(super().create_connection(origin))
+
+    return _SingleFlightPool
+
+
 class HTTPTransport(BaseTransport):
     def __init__(
         self,
@@ -153,7 +270,7 @@ class HTTPTransport(BaseTransport):
         ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
 
         if proxy is None:
-            self._pool = httpcore.ConnectionPool(
+            self._pool = _single_flight_pool_class(httpcore.ConnectionPool)(
                 ssl_context=ssl_context,
                 max_connections=limits.max_connections,
                 max_keepalive_connections=limits.max_keepalive_connections,
@@ -166,7 +283,7 @@ class HTTPTransport(BaseTransport):
                 socket_options=socket_options,
             )
         elif proxy.url.scheme in ("http", "https"):
-            self._pool = httpcore.HTTPProxy(
+            self._pool = _single_flight_pool_class(httpcore.HTTPProxy)(
                 proxy_url=httpcore.URL(
                     scheme=proxy.url.raw_scheme,
                     host=proxy.url.raw_host,
@@ -193,7 +310,7 @@ class HTTPTransport(BaseTransport):
                     "Make sure to install httpx using `pip install httpx[socks]`."
                 ) from None
 
-            self._pool = httpcore.SOCKSProxy(
+            self._pool = _single_flight_pool_class(httpcore.SOCKSProxy)(
                 proxy_url=httpcore.URL(
                     scheme=proxy.url.raw_scheme,
                     host=proxy.url.raw_host,
@@ -277,6 +394,12 @@ class AsyncResponseStream(AsyncByteStream):
 
 
 class AsyncHTTPTransport(AsyncBaseTransport):
+    # Unlike the sync transport, this does not need to restrict connections to
+    # a single in-flight request. Tasks on an event loop only interleave at
+    # `await` points, and the HTTP/2 state machine is only operated on by
+    # synchronous code between those points, so the shared state cannot be
+    # mutated mid-iteration. (#3566)
+
     def __init__(
         self,
         verify: ssl.SSLContext | str | bool = True,
