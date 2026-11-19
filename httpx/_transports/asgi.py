@@ -100,6 +100,9 @@ class ASGITransport(AsyncBaseTransport):
         self,
         request: Request,
     ) -> Response:
+        """
+        Send a single HTTP request to the ASGI app.
+        """
         assert isinstance(request.stream, AsyncByteStream)
 
         # ASGI scope.

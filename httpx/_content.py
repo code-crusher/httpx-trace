@@ -29,6 +29,18 @@ __all__ = ["ByteStream"]
 
 
 class ByteStream(AsyncByteStream, SyncByteStream):
+    """
+    A byte stream, consisting of a single chunk of bytes.
+
+    Usage:
+
+    ```python
+    stream = httpx.ByteStream(b"Hello, world!")
+    for chunk in stream:
+        print(chunk)
+    ```
+    """
+
     def __init__(self, stream: bytes) -> None:
         self._stream = stream
 

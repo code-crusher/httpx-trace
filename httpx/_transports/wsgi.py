@@ -89,6 +89,9 @@ class WSGITransport(BaseTransport):
         self.wsgi_errors = wsgi_errors
 
     def handle_request(self, request: Request) -> Response:
+        """
+        Send a single HTTP request to the WSGI app.
+        """
         request.read()
         wsgi_input = io.BytesIO(request.content)
 

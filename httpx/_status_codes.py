@@ -37,6 +37,10 @@ class codes(IntEnum):
 
     @classmethod
     def get_reason_phrase(cls, value: int) -> str:
+        """
+        Return the standard reason phrase for a status code, or an empty
+        string if the status code is not recognized.
+        """
         try:
             return codes(value).phrase  # type: ignore
         except ValueError:

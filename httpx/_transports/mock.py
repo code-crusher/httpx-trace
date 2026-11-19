@@ -13,6 +13,26 @@ __all__ = ["MockTransport"]
 
 
 class MockTransport(AsyncBaseTransport, BaseTransport):
+    """
+    A transport that accepts a handler function, which can be used to
+    map requests onto pre-determined responses, rather than making
+    actual network requests.
+
+    Usage:
+
+    ```python
+    def handler(request):
+        return httpx.Response(200, json={"text": "Hello, world!"})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    ```
+
+    The handler function takes a `Request` instance, and either returns a
+    `Response` instance, or, for the async case, returns a `Response`
+    instance, optionally awaited from an async function.
+    """
+
     def __init__(self, handler: SyncHandler | AsyncHandler) -> None:
         self.handler = handler
 
@@ -20,6 +40,9 @@ class MockTransport(AsyncBaseTransport, BaseTransport):
         self,
         request: Request,
     ) -> Response:
+        """
+        Send a single HTTP request, using the mock handler.
+        """
         request.read()
         response = self.handler(request)
         if not isinstance(response, Response):  # pragma: no cover
@@ -30,6 +53,9 @@ class MockTransport(AsyncBaseTransport, BaseTransport):
         self,
         request: Request,
     ) -> Response:
+        """
+        Send a single HTTP request, using the mock handler.
+        """
         await request.aread()
         response = self.handler(request)
 

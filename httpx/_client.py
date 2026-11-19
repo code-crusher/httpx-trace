@@ -229,6 +229,9 @@ class BaseClient:
 
     @property
     def trust_env(self) -> bool:
+        """
+        Enables or disables usage of environment variables for configuration.
+        """
         return self._trust_env
 
     def _enforce_trailing_slash(self, url: URL) -> URL:
@@ -252,6 +255,9 @@ class BaseClient:
 
     @property
     def timeout(self) -> Timeout:
+        """
+        The timeout configuration to use when sending requests.
+        """
         return self._timeout
 
     @timeout.setter
@@ -260,6 +266,10 @@ class BaseClient:
 
     @property
     def event_hooks(self) -> dict[str, list[EventHook]]:
+        """
+        The event hooks to use when sending requests, as a dictionary
+        of `"request"` and `"response"` hook lists.
+        """
         return self._event_hooks
 
     @event_hooks.setter

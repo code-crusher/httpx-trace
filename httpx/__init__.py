@@ -1,3 +1,19 @@
+"""
+A next generation HTTP client, for Python 3.
+
+The `httpx` package provides both top-level shortcuts, such as `httpx.get()`,
+as well as a `Client` class, for more advanced usage.
+
+Usage:
+
+```
+>>> import httpx
+>>> response = httpx.get('https://www.example.com')
+>>> response
+<Response [200 OK]>
+```
+"""
+
 from .__version__ import __description__, __title__, __version__
 from ._api import *
 from ._auth import *

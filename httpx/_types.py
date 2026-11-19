@@ -90,7 +90,24 @@ __all__ = ["AsyncByteStream", "SyncByteStream"]
 
 
 class SyncByteStream:
+    """
+    A byte stream, iterable in sync style, yielding chunks of bytes.
+
+    Subclass this and override the `.__iter__()` method to implement a custom
+    stream. For example, to build a stream that yields two chunks of bytes:
+
+    ```python
+    class DoubleStream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"Hello, "
+            yield b"world!"
+    ```
+    """
+
     def __iter__(self) -> Iterator[bytes]:
+        """
+        A byte-iterator, yielding chunks of bytes.
+        """
         raise NotImplementedError(
             "The '__iter__' method must be implemented."
         )  # pragma: no cover
@@ -104,11 +121,31 @@ class SyncByteStream:
 
 
 class AsyncByteStream:
+    """
+    A byte stream, iterable in async style, yielding chunks of bytes.
+
+    Subclass this and override the `.__aiter__()` method to implement a custom
+    stream. For example, to build a stream that yields two chunks of bytes:
+
+    ```python
+    class DoubleStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"Hello, "
+            yield b"world!"
+    ```
+    """
+
     async def __aiter__(self) -> AsyncIterator[bytes]:
+        """
+        A byte-iterator, yielding chunks of bytes.
+        """
         raise NotImplementedError(
             "The '__aiter__' method must be implemented."
         )  # pragma: no cover
         yield b""  # pragma: no cover
 
     async def aclose(self) -> None:
-        pass
+        """
+        Subclasses can override this method to release any network resources
+        after a request/response cycle is complete.
+        """

@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 * Expose `FunctionAuth` from the public API. (#3699)
+* Improve docstring structuring for code autocompletion. Docstrings are now
+  consistently included across all the public API, including the previously
+  undocumented `httpx.Request`, `httpx.Response`, transport, and stream
+  classes. (#3355)
 
 ## 0.28.1 (6th December, 2024)
 

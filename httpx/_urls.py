@@ -340,15 +340,29 @@ class URL:
         return URL(self, **kwargs)
 
     def copy_set_param(self, key: str, value: typing.Any = None) -> URL:
+        """
+        Copy this URL, returning a new URL with the given key
+        set to a single value.
+        """
         return self.copy_with(params=self.params.set(key, value))
 
     def copy_add_param(self, key: str, value: typing.Any = None) -> URL:
+        """
+        Copy this URL, returning a new URL with the given key
+        set to an additional value.
+        """
         return self.copy_with(params=self.params.add(key, value))
 
     def copy_remove_param(self, key: str) -> URL:
+        """
+        Copy this URL, returning a new URL with the given key removed.
+        """
         return self.copy_with(params=self.params.remove(key))
 
     def copy_merge_params(self, params: QueryParamTypes) -> URL:
+        """
+        Copy this URL, returning a new URL updated with the given params.
+        """
         return self.copy_with(params=self.params.merge(params))
 
     def join(self, url: URL | str) -> URL:
@@ -402,6 +416,12 @@ class URL:
 
     @property
     def raw(self) -> tuple[bytes, bytes, int, bytes]:  # pragma: nocover
+        """
+        *(deprecated)* The URL components as a tuple of raw bytes.
+
+        Use the `.raw_scheme`, `.raw_host`, `.port`, and `.raw_path` properties
+        instead.
+        """
         import collections
         import warnings
 
@@ -629,6 +649,10 @@ class QueryParams(typing.Mapping[str, str]):
         return f"{class_name}({query_string!r})"
 
     def update(self, params: QueryParamTypes | None = None) -> None:
+        """
+        QueryParams are immutable, so this raises a `RuntimeError`.
+        Use `q = q.merge(...)` to create an updated copy.
+        """
         raise RuntimeError(
             "QueryParams are immutable since 0.18.0. "
             "Use `q = q.merge(...)` to create an updated copy."

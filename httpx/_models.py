@@ -200,9 +200,17 @@ class Headers(typing.MutableMapping[str, str]):
         return [(raw_key, value) for raw_key, _, value in self._list]
 
     def keys(self) -> typing.KeysView[str]:
+        """
+        Return the header keys, as a set-like view. Case-sensitive duplicate
+        keys are de-duplicated, with casing retained from the last occurrence.
+        """
         return {key.decode(self.encoding): None for _, key, value in self._list}.keys()
 
     def values(self) -> typing.ValuesView[str]:
+        """
+        Return the header values, as a dict-like view. Case-insensitive
+        duplicates are concatenated together with commas.
+        """
         values_dict: dict[str, str] = {}
         for _, key, value in self._list:
             str_key = key.decode(self.encoding)
@@ -272,6 +280,10 @@ class Headers(typing.MutableMapping[str, str]):
         return split_values
 
     def update(self, headers: HeaderTypes | None = None) -> None:  # type: ignore
+        """
+        Update the headers with the given headers, replacing any
+        case-insensitive matches.
+        """
         headers = Headers(headers)
         for key in headers.keys():
             if key in self:
@@ -279,6 +291,9 @@ class Headers(typing.MutableMapping[str, str]):
         self._list.extend(headers._list)
 
     def copy(self) -> Headers:
+        """
+        Return a copy of the headers, with the same encoding.
+        """
         return Headers(self, encoding=self.encoding)
 
     def __getitem__(self, key: str) -> str:
@@ -380,6 +395,46 @@ class Headers(typing.MutableMapping[str, str]):
 
 
 class Request:
+    """
+    An HTTP request. Can be constructed explicitly for more control over
+    exactly what gets sent over the wire.
+
+    Usage:
+
+    ```python
+    request = httpx.Request(
+        method="GET",
+        url="https://www.example.com",
+        headers={"Host": "www.example.com"},
+    )
+    response = client.send(request)
+    ```
+
+    **Parameters:**
+
+    * **method** - HTTP method for the new `Request` object: `GET`, `OPTIONS`,
+    `HEAD`, `POST`, `PUT`, `PATCH`, or `DELETE`.
+    * **url** - URL for the new `Request` object.
+    * **params** - *(optional)* Query parameters to include in the URL, as a
+    string, dictionary, or sequence of two-tuples.
+    * **headers** - *(optional)* Dictionary of HTTP headers to include in the
+    request.
+    * **cookies** - *(optional)* Dictionary of Cookie items to include in the
+    request.
+    * **content** - *(optional)* Binary content to include in the body of the
+    request, as bytes or a byte iterator.
+    * **data** - *(optional)* Form data to include in the body of the request,
+    as a dictionary.
+    * **files** - *(optional)* A dictionary of upload files to include in the
+    body of the request.
+    * **json** - *(optional)* A JSON serializable object to include in the body
+    of the request.
+    * **stream** - *(optional)* Use a byte stream as the request body.
+
+    Note that an explicitly constructed `Request` instance does not include any
+    default request headers, such as `User-Agent` or `Accept-Encoding`.
+    """
+
     def __init__(
         self,
         method: str,
@@ -461,6 +516,11 @@ class Request:
 
     @property
     def content(self) -> bytes:
+        """
+        The request content, as bytes.
+
+        Raises `httpx.RequestNotRead` if the request has not been read.
+        """
         if not hasattr(self, "_content"):
             raise RequestNotRead()
         return self._content
@@ -513,6 +573,41 @@ class Request:
 
 
 class Response:
+    """
+    An HTTP response.
+
+    Usage:
+
+    ```python
+    response = httpx.Response(200, content=b"Hello, world!")
+    ```
+
+    **Parameters:**
+
+    * **status_code** - The status code of the response, eg. `200`.
+    * **headers** - *(optional)* Dictionary of HTTP headers to include in the
+    response.
+    * **content** - *(optional)* Binary content to include in the body of the
+    response, as bytes or a byte iterator.
+    * **text** - *(optional)* Text content to include in the body of the
+    response, with an appropriate `Content-Type` and `Content-Length` header.
+    * **html** - *(optional)* HTML content to include in the body of the
+    response, with an appropriate `Content-Type` and `Content-Length` header.
+    * **json** - *(optional)* A JSON serializable object to include in the body
+    of the response, with an appropriate `Content-Type` and `Content-Length`
+    header.
+    * **stream** - *(optional)* Use a byte stream as the response body.
+    * **request** - *(optional)* The `Request` instance associated with the
+    response.
+    * **extensions** - *(optional)* Dictionary of response extensions.
+    * **history** - *(optional)* A list of previous `Response` instances,
+    associated with any redirect responses.
+    * **default_encoding** - *(optional)* The default encoding to use for
+    decoding response text, if no charset information is included in a response
+    Content-Type header. Set to a callable for automatic character set
+    detection. Default: "utf-8".
+    """
+
     def __init__(
         self,
         status_code: int,
@@ -609,6 +704,9 @@ class Response:
 
     @property
     def http_version(self) -> str:
+        """
+        The HTTP version used on the response, as a string, eg. `"HTTP/1.1"`.
+        """
         try:
             http_version: bytes = self.extensions["http_version"]
         except KeyError:
@@ -618,6 +716,10 @@ class Response:
 
     @property
     def reason_phrase(self) -> str:
+        """
+        The standard reason phrase associated with the response status code,
+        eg. `"OK"`.
+        """
         try:
             reason_phrase: bytes = self.extensions["reason_phrase"]
         except KeyError:
@@ -634,12 +736,22 @@ class Response:
 
     @property
     def content(self) -> bytes:
+        """
+        The response content, as bytes.
+
+        Raises `httpx.ResponseNotRead` if the response has not been read.
+        """
         if not hasattr(self, "_content"):
             raise ResponseNotRead()
         return self._content
 
     @property
     def text(self) -> str:
+        """
+        The response content, as text.
+
+        Raises `httpx.ResponseNotRead` if the response has not been read.
+        """
         if not hasattr(self, "_text"):
             content = self.content
             if not content:
@@ -829,10 +941,17 @@ class Response:
         raise HTTPStatusError(message, request=request, response=self)
 
     def json(self, **kwargs: typing.Any) -> typing.Any:
+        """
+        Return the response content, deserialized as JSON.
+        """
         return jsonlib.loads(self.content, **kwargs)
 
     @property
     def cookies(self) -> Cookies:
+        """
+        Cookie values to include when sending requests, extracted from
+        the response `Set-Cookie` headers.
+        """
         if not hasattr(self, "_cookies"):
             self._cookies = Cookies()
             self._cookies.extract_cookies(self)
@@ -854,6 +973,10 @@ class Response:
 
     @property
     def num_bytes_downloaded(self) -> int:
+        """
+        The number of bytes that have been downloaded while streaming
+        the response content.
+        """
         return self._num_bytes_downloaded
 
     def __repr__(self) -> str:
@@ -924,6 +1047,12 @@ class Response:
                 yield chunk
 
     def iter_lines(self) -> typing.Iterator[str]:
+        """
+        A line-iterator over the decoded response content, that handles
+        both gzip, deflate, etc but also detects the content's string encoding.
+
+        Universal line endings are used, normalising all cases to `\n`.
+        """
         decoder = LineDecoder()
         with request_context(request=self._request):
             for text in self.iter_text():
@@ -1026,6 +1155,12 @@ class Response:
                 yield chunk
 
     async def aiter_lines(self) -> typing.AsyncIterator[str]:
+        """
+        A line-iterator over the decoded response content, that handles
+        both gzip, deflate, etc but also detects the content's string encoding.
+
+        Universal line endings are used, normalising all cases to `\n`.
+        """
         decoder = LineDecoder()
         with request_context(request=self._request):
             async for text in self.aiter_text():
@@ -1203,6 +1338,9 @@ class Cookies(typing.MutableMapping[str, str]):
         self.jar.clear(*args)
 
     def update(self, cookies: CookieTypes | None = None) -> None:  # type: ignore
+        """
+        Update the cookie store with the given cookies.
+        """
         cookies = Cookies(cookies)
         for cookie in cookies.jar:
             self.jar.set_cookie(cookie)

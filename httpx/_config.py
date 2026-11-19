@@ -25,6 +25,18 @@ def create_ssl_context(
     cert: CertTypes | None = None,
     trust_env: bool = True,
 ) -> ssl.SSLContext:
+    """
+    Build an SSL context from the given `verify` and `cert` configuration.
+
+    This is used internally when a `verify=...` argument is passed to
+    `Client()`, `AsyncClient()`, `HTTPTransport()`, or `AsyncHTTPTransport()`.
+
+    * `verify=True` - Use an SSL context with the default CA bundle.
+    * `verify=False` - Disable SSL verification.
+    * `verify=<str>` - *(deprecated)* Use a custom CA bundle, given as either
+    a CA file or a CA directory.
+    * `verify=<ssl.SSLContext>` - Use a custom SSL context.
+    """
     import ssl
     import warnings
 
@@ -130,6 +142,9 @@ class Timeout:
             self.pool = timeout if isinstance(pool, UnsetType) else pool
 
     def as_dict(self) -> dict[str, float | None]:
+        """
+        Return the timeout configuration as a dictionary.
+        """
         return {
             "connect": self.connect,
             "read": self.read,
@@ -199,6 +214,30 @@ class Limits:
 
 
 class Proxy:
+    """
+    A configuration of the proxy server.
+
+    Usage:
+
+    ```
+    proxy = httpx.Proxy("http://proxy.example.com:8030")
+    client = httpx.Client(proxy=proxy)
+    ```
+
+    **Parameters:**
+
+    * **url** - The URL of the proxy. May either use an `http://`, `https://`,
+    `socks5://`, or `socks5h://` scheme.
+    * **ssl_context** - *(optional)* An SSL context to use for proxy connections.
+    * **auth** - *(optional)* A two-tuple of proxy authentication credentials,
+    as `(username, password)`.
+    * **headers** - *(optional)* HTTP headers to include on proxy connections.
+
+    Note that proxy authentication credentials may also be included as the
+    userinfo section of the proxy URL. In this case the `Proxy.auth` property
+    is populated, and the credentials are removed from the URL.
+    """
+
     def __init__(
         self,
         url: URL | str,
@@ -225,7 +264,9 @@ class Proxy:
 
     @property
     def raw_auth(self) -> tuple[bytes, bytes] | None:
-        # The proxy authentication as raw bytes.
+        """
+        The proxy authentication credentials as raw bytes, or `None`.
+        """
         return (
             None
             if self.auth is None

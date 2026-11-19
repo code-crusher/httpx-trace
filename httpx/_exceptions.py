@@ -95,6 +95,9 @@ class HTTPError(Exception):
 
     @property
     def request(self) -> Request:
+        """
+        The request instance associated with the exception.
+        """
         if self._request is None:
             raise RuntimeError("The .request property has not been set.")
         return self._request

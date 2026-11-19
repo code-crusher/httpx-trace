@@ -120,6 +120,9 @@ class FunctionAuth(Auth):
         self._func = func
 
     def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
+        """
+        Execute the authentication flow, by calling the given function.
+        """
         yield self._func(request)
 
 
@@ -133,6 +136,10 @@ class BasicAuth(Auth):
         self._auth_header = self._build_auth_header(username, password)
 
     def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
+        """
+        Execute the HTTP Basic authentication flow, by adding an
+        `Authorization: Basic ...` header to the request.
+        """
         request.headers["Authorization"] = self._auth_header
         yield request
 
@@ -155,6 +162,10 @@ class NetRCAuth(Auth):
         self._netrc_info = netrc.netrc(file)
 
     def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
+        """
+        Execute the HTTP Basic authentication flow, using credentials
+        from the netrc file, based on the url host.
+        """
         auth_info = self._netrc_info.authenticators(request.url.host)
         if auth_info is None or not auth_info[2]:
             # The netrc file did not have authentication credentials for this host.
@@ -173,6 +184,18 @@ class NetRCAuth(Auth):
 
 
 class DigestAuth(Auth):
+    """
+    Allows the 'auth' argument to be passed as an instance of the `DigestAuth`
+    class, and uses HTTP Digest authentication.
+
+    Usage:
+
+    ```python
+    auth = httpx.DigestAuth(username="user", password="pass")
+    client = httpx.Client(auth=auth)
+    ```
+    """
+
     _ALGORITHM_TO_HASH_FUNCTION: dict[str, typing.Callable[[bytes], _Hash]] = {
         "MD5": hashlib.md5,
         "MD5-SESS": hashlib.md5,
@@ -191,6 +214,14 @@ class DigestAuth(Auth):
         self._nonce_count = 1
 
     def auth_flow(self, request: Request) -> typing.Generator[Request, Response, None]:
+        """
+        Execute the HTTP Digest authentication flow.
+
+        The first request is sent without an `Authorization` header. If the
+        response is a `401 Unauthorized` response with a
+        `WWW-Authenticate: Digest ...` header, then an authenticated request
+        is built using the challenge from the response, and dispatched.
+        """
         if self._last_challenge:
             request.headers["Authorization"] = self._build_auth_header(
                 request, self._last_challenge

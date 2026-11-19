@@ -133,6 +133,42 @@ class ResponseStream(SyncByteStream):
 
 
 class HTTPTransport(BaseTransport):
+    """
+    An HTTP transport, with connection pooling, HTTP/2, retries, proxy support,
+    and more. Used by `httpx.Client` unless an alternative transport is
+    provided.
+
+    Usage:
+
+    ```python
+    transport = httpx.HTTPTransport(local_address="0.0.0.0")
+    client = httpx.Client(transport=transport)
+    ```
+
+    **Parameters:**
+
+    * **verify** - Either `True` to use an SSL context with the default CA
+    bundle, `False` to disable verification, or an instance of `ssl.SSLContext`
+    to use a custom context.
+    * **cert** - *(optional)* Deprecated client side certificate configuration.
+    Use `verify=<ssl_context>` with `.load_cert_chain()` instead.
+    * **trust_env** - Enables or disables usage of environment variables
+    for configuration.
+    * **http1** - A boolean indicating if HTTP/1.1 support should be
+    enabled. Defaults to `True`.
+    * **http2** - A boolean indicating if HTTP/2 support should be
+    enabled. Defaults to `False`.
+    * **limits** - The connection pool limits configuration to use.
+    * **proxy** - A proxy URL where all the traffic should be routed.
+    * **uds** - Path to a Unix domain socket to use for connections.
+    * **local_address** - Local address to bind sockets to. Either an IP address
+    or an `(IP address, port)` two-tuple.
+    * **retries** - The number of times to retry a connection, in cases where
+    an `httpx.ConnectError` or `httpx.ConnectTimeout` occurs.
+    * **socket_options** - Advanced socket options, passed to the underlying
+    `httpcore` implementation.
+    """
+
     def __init__(
         self,
         verify: ssl.SSLContext | str | bool = True,
@@ -231,6 +267,9 @@ class HTTPTransport(BaseTransport):
         self,
         request: Request,
     ) -> Response:
+        """
+        Send a single HTTP request, using the underlying connection pool.
+        """
         assert isinstance(request.stream, SyncByteStream)
         import httpcore
 
@@ -259,6 +298,9 @@ class HTTPTransport(BaseTransport):
         )
 
     def close(self) -> None:
+        """
+        Close the transport and release any network resources.
+        """
         self._pool.close()
 
 
@@ -277,6 +319,21 @@ class AsyncResponseStream(AsyncByteStream):
 
 
 class AsyncHTTPTransport(AsyncBaseTransport):
+    """
+    An asynchronous HTTP transport, with connection pooling, HTTP/2, retries,
+    proxy support, and more. Used by `httpx.AsyncClient` unless an alternative
+    transport is provided.
+
+    Usage:
+
+    ```python
+    transport = httpx.AsyncHTTPTransport(retries=1)
+    client = httpx.AsyncClient(transport=transport)
+    ```
+
+    **Parameters:** See `httpx.HTTPTransport`.
+    """
+
     def __init__(
         self,
         verify: ssl.SSLContext | str | bool = True,
@@ -375,6 +432,9 @@ class AsyncHTTPTransport(AsyncBaseTransport):
         self,
         request: Request,
     ) -> Response:
+        """
+        Send a single HTTP request, using the underlying connection pool.
+        """
         assert isinstance(request.stream, AsyncByteStream)
         import httpcore
 
@@ -403,4 +463,7 @@ class AsyncHTTPTransport(AsyncBaseTransport):
         )
 
     async def aclose(self) -> None:
+        """
+        Close the transport and release any network resources.
+        """
         await self._pool.aclose()

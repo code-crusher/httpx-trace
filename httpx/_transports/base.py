@@ -12,6 +12,24 @@ __all__ = ["AsyncBaseTransport", "BaseTransport"]
 
 
 class BaseTransport:
+    """
+    Base class for transport implementations that handle sync requests.
+
+    Subclass this and override the `.handle_request()` method to implement
+    a custom transport, for use with `httpx.Client`.
+
+    Usage:
+
+    ```python
+    class HelloWorldTransport(httpx.BaseTransport):
+        def handle_request(self, request):
+            return httpx.Response(200, json={"text": "Hello, world!"})
+
+    transport = HelloWorldTransport()
+    client = httpx.Client(transport=transport)
+    ```
+    """
+
     def __enter__(self: T) -> T:
         return self
 
@@ -59,10 +77,30 @@ class BaseTransport:
         )  # pragma: no cover
 
     def close(self) -> None:
-        pass
+        """
+        Close the transport and release any network resources.
+        """
 
 
 class AsyncBaseTransport:
+    """
+    Base class for transport implementations that handle async requests.
+
+    Subclass this and override the `.handle_async_request()` method to implement
+    a custom transport, for use with `httpx.AsyncClient`.
+
+    Usage:
+
+    ```python
+    class HelloWorldTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return httpx.Response(200, json={"text": "Hello, world!"})
+
+    transport = HelloWorldTransport()
+    client = httpx.AsyncClient(transport=transport)
+    ```
+    """
+
     async def __aenter__(self: A) -> A:
         return self
 
@@ -78,9 +116,28 @@ class AsyncBaseTransport:
         self,
         request: Request,
     ) -> Response:
+        """
+        Send a single HTTP request and return a response.
+
+        Developers shouldn't typically ever need to call into this API directly,
+        since the AsyncClient class provides all the higher level user-facing API
+        niceties.
+
+        In order to properly release any network resources, the response
+        stream should *either* be consumed immediately, with a call to
+        `await response.stream.aclose()`, or else the `handle_async_request`
+        call should be followed with a try/finally block to ensuring the stream
+        is always closed.
+
+        Takes a `Request` instance as the only argument.
+
+        Returns a `Response` instance.
+        """
         raise NotImplementedError(
             "The 'handle_async_request' method must be implemented."
         )  # pragma: no cover
 
     async def aclose(self) -> None:
-        pass
+        """
+        Close the transport and release any network resources.
+        """
