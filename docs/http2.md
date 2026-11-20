@@ -51,6 +51,12 @@ HTTP/2 support is available on both `Client` and `AsyncClient`, although it's
 typically more useful in async contexts if you're issuing lots of concurrent
 requests.
 
+When a synchronous `Client` with HTTP/2 support is shared between threads,
+each in-flight request is handled on its own connection, rather than
+multiplexing concurrent streams from different threads onto a single
+connection. This keeps the HTTP/2 connection state confined to one thread at
+a time.
+
 ## Inspecting the HTTP version
 
 Enabling HTTP/2 support on the client does not *necessarily* mean that your
