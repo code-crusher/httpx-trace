@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 * Expose `FunctionAuth` from the public API. (#3699)
 
+### Fixed
+
+* Retry idempotent requests on a new connection when an HTTP/2 server gracefully
+  terminates a pooled connection, either with a GOAWAY frame or by closing a
+  connection that is idle in the connection pool. (#3324)
+
 ## 0.28.1 (6th December, 2024)
 
 * Fix SSL case where `verify=False` together with client side certificates.

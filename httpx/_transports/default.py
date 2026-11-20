@@ -36,6 +36,7 @@ if typing.TYPE_CHECKING:
     import httpx  # pragma: no cover
 
 from .._config import DEFAULT_LIMITS, Limits, Proxy, create_ssl_context
+from .._content import ByteStream
 from .._exceptions import (
     ConnectError,
     ConnectTimeout,
@@ -116,6 +117,47 @@ def map_httpcore_exceptions() -> typing.Iterator[None]:
 
         message = str(exc)
         raise mapped_exc(message) from exc
+
+
+# Requests using these methods are safe to transparently retry,
+# since re-sending them cannot cause duplicate side effects.
+IDEMPOTENT_METHODS = frozenset(["GET", "HEAD", "OPTIONS", "TRACE"])
+
+
+def _connection_terminated(exc: BaseException | None) -> bool:
+    """
+    Determine if an exception represents a server gracefully terminating
+    the connection before any response has been received.
+
+    Covers the two cases where a pooled HTTP/2 connection has been closed
+    by the server without our request having necessarily been processed:
+
+    * A graceful GOAWAY frame. (``ConnectionTerminated error_code:0``)
+    * The server closing a connection that was idle in the connection pool.
+      ("Server disconnected")
+    """
+    import httpcore
+
+    if not isinstance(exc, httpcore.RemoteProtocolError):
+        return False
+
+    arg = exc.args[0] if exc.args else None
+    if isinstance(arg, str):
+        # A connection that was sat idle in the connection pool has been
+        # closed by the server, without sending a response to our request.
+        return arg.startswith("Server disconnected")
+
+    # A GOAWAY frame. Only retry on a graceful termination, indicated by
+    # an error code of zero. Any other error indicates a protocol error,
+    # and should be raised.
+    try:
+        import h2.events  # noqa
+    except ImportError:  # pragma: no cover
+        return False
+    return (
+        isinstance(arg, h2.events.ConnectionTerminated)
+        and getattr(arg, "error_code", None) == 0
+    )
 
 
 class ResponseStream(SyncByteStream):
@@ -234,29 +276,51 @@ class HTTPTransport(BaseTransport):
         assert isinstance(request.stream, SyncByteStream)
         import httpcore
 
-        req = httpcore.Request(
-            method=request.method,
-            url=httpcore.URL(
-                scheme=request.url.raw_scheme,
-                host=request.url.raw_host,
-                port=request.url.port,
-                target=request.url.raw_path,
-            ),
-            headers=request.headers.raw,
-            content=request.stream,
-            extensions=request.extensions,
+        # If a pooled connection has been closed by the server then we may
+        # retry a single time on a new connection, rather than raising
+        # a protocol error for a request that was never processed.
+        #
+        # We only ever retry idempotent requests, and only when the request
+        # content is held in memory, so that the request body can be resent.
+        retries = (
+            1
+            if (
+                request.method in IDEMPOTENT_METHODS
+                and isinstance(request.stream, ByteStream)
+            )
+            else 0
         )
-        with map_httpcore_exceptions():
-            resp = self._pool.handle_request(req)
 
-        assert isinstance(resp.stream, typing.Iterable)
+        while True:
+            req = httpcore.Request(
+                method=request.method,
+                url=httpcore.URL(
+                    scheme=request.url.raw_scheme,
+                    host=request.url.raw_host,
+                    port=request.url.port,
+                    target=request.url.raw_path,
+                ),
+                headers=request.headers.raw,
+                content=request.stream,
+                extensions=request.extensions,
+            )
+            try:
+                with map_httpcore_exceptions():
+                    resp = self._pool.handle_request(req)
+            except RemoteProtocolError as exc:
+                if retries and _connection_terminated(exc.__cause__):
+                    retries -= 1
+                    continue
+                raise
 
-        return Response(
-            status_code=resp.status,
-            headers=resp.headers,
-            stream=ResponseStream(resp.stream),
-            extensions=resp.extensions,
-        )
+            assert isinstance(resp.stream, typing.Iterable)
+
+            return Response(
+                status_code=resp.status,
+                headers=resp.headers,
+                stream=ResponseStream(resp.stream),
+                extensions=resp.extensions,
+            )
 
     def close(self) -> None:
         self._pool.close()
@@ -378,29 +442,51 @@ class AsyncHTTPTransport(AsyncBaseTransport):
         assert isinstance(request.stream, AsyncByteStream)
         import httpcore
 
-        req = httpcore.Request(
-            method=request.method,
-            url=httpcore.URL(
-                scheme=request.url.raw_scheme,
-                host=request.url.raw_host,
-                port=request.url.port,
-                target=request.url.raw_path,
-            ),
-            headers=request.headers.raw,
-            content=request.stream,
-            extensions=request.extensions,
+        # If a pooled connection has been closed by the server then we may
+        # retry a single time on a new connection, rather than raising
+        # a protocol error for a request that was never processed.
+        #
+        # We only ever retry idempotent requests, and only when the request
+        # content is held in memory, so that the request body can be resent.
+        retries = (
+            1
+            if (
+                request.method in IDEMPOTENT_METHODS
+                and isinstance(request.stream, ByteStream)
+            )
+            else 0
         )
-        with map_httpcore_exceptions():
-            resp = await self._pool.handle_async_request(req)
 
-        assert isinstance(resp.stream, typing.AsyncIterable)
+        while True:
+            req = httpcore.Request(
+                method=request.method,
+                url=httpcore.URL(
+                    scheme=request.url.raw_scheme,
+                    host=request.url.raw_host,
+                    port=request.url.port,
+                    target=request.url.raw_path,
+                ),
+                headers=request.headers.raw,
+                content=request.stream,
+                extensions=request.extensions,
+            )
+            try:
+                with map_httpcore_exceptions():
+                    resp = await self._pool.handle_async_request(req)
+            except RemoteProtocolError as exc:
+                if retries and _connection_terminated(exc.__cause__):
+                    retries -= 1
+                    continue
+                raise
 
-        return Response(
-            status_code=resp.status,
-            headers=resp.headers,
-            stream=AsyncResponseStream(resp.stream),
-            extensions=resp.extensions,
-        )
+            assert isinstance(resp.stream, typing.AsyncIterable)
+
+            return Response(
+                status_code=resp.status,
+                headers=resp.headers,
+                stream=AsyncResponseStream(resp.stream),
+                extensions=resp.extensions,
+            )
 
     async def aclose(self) -> None:
         await self._pool.aclose()
