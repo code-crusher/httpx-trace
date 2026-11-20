@@ -37,6 +37,10 @@ def test_urlparse(test_case):
     port = "" if p.port is None else str(p.port)
     # I have nothing to say about this one.
     path = p.path
+    # We percent-encode "|" in paths, unlike the WHATWG spec, which leaves it
+    # unencoded. This aligns with RFC 3986 and Python's stdlib, since "|" is
+    # not a valid pchar and some servers reject or redirect such URLs.
+    expected_path = test_case["pathname"].replace("|", "%7C")
     # The 'search' and 'hash' components in the whatwg tests are semantic, not literal.
     # Our parsing differentiates between no query/hash and empty-string query/hash.
     search = "" if p.query in (None, "") else "?" + str(p.query)
@@ -47,6 +51,6 @@ def test_urlparse(test_case):
     assert protocol == test_case["protocol"]
     assert hostname.lower() == test_case["hostname"].lower()
     assert port == test_case["port"]
-    assert path == test_case["pathname"]
+    assert path == expected_path
     assert search == test_case["search"]
     assert hash == test_case["hash"]

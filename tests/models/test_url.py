@@ -140,6 +140,14 @@ def test_path_query_fragment(url, raw_path, path, query, fragment):
     assert url.fragment == fragment
 
 
+def test_url_pipe_encoding_in_path():
+    # The pipe character is not a valid path character per RFC 3986,
+    # so it should be percent-encoded.
+    url = httpx.URL("https://example.com/path|segment")
+    assert url.raw_path == b"/path%7Csegment"
+    assert url.path == "/path|segment"
+
+
 def test_url_query_encoding():
     url = httpx.URL("https://www.example.com/?a=b c&d=e/f")
     assert url.raw_path == b"/?a=b%20c&d=e/f"
